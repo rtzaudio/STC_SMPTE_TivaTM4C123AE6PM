@@ -1,0 +1,68 @@
+# Object files
+*.o
+*.d
+*.ko
+*.obj
+*.elf
+*.bak
+
+# Directories
+[Dd]ebug/
+[Rr]elease/
+src/
+
+.settings/
+.launches/
+.config/**/
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.libs
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+
+
+# Windows
+# =========================
+
+# Windows image file caches
+Thumbs.db
+ehthumbs.db
+
+# Folder config file
+Desktop.ini
+
+# Recycle Bin used on file shares
+$RECYCLE.BIN/
+
+# Windows Installer files
+*.cab
+*.msi
+*.msm
+*.msp
+
+# Windows shortcuts
+*.lnk
+*.aem4f
