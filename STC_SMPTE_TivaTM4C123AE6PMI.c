@@ -134,10 +134,8 @@ void STC_SMPTE_initGeneral(void)
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOG);
 
 	// Initialize the EEPROM so we can access it later
 
@@ -148,6 +146,14 @@ void STC_SMPTE_initGeneral(void)
 
     uint32_t size = EEPROMSizeGet();
 }
+
+#if 0
+PortFunctionInit(void)
+{
+
+
+
+#endif
 
 /*
  *  =============================== GPIO ===============================
@@ -223,28 +229,30 @@ const GPIOTiva_Config GPIOTiva_config = {
  */
 void STC_SMPTE_initGPIO(void)
 {
-	// Enable pin PA3 for GPIOOutput
-	GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_3);
-	// Enable pin PB5 for GPIOOutput
-	GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_5);
-	// Enable pin PC7 for GPIOInput
-	GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_7);
-	// Enable pin PD4 for GPIOOutput
-	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_4);
-	// Enable pin PD5 for GPIOInput
-	GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, GPIO_PIN_5);
-	// Enable pin PD1 for GPIOOutput
-	GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, GPIO_PIN_1);
-	// Enable pin PF3 for GPIOOutput
-	GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_3);
-	// Enable pin PF2 for GPIOInput
-	GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, GPIO_PIN_2);
-	// Enable pin PG4 for GPIOInput
-	GPIOPinTypeGPIOInput(GPIO_PORTG_BASE, GPIO_PIN_4);
-	// Enable pin PG3 for GPIOInput
-	GPIOPinTypeGPIOInput(GPIO_PORTG_BASE, GPIO_PIN_3);
-	// Enable pin PG2 for GPIOInput
-	GPIOPinTypeGPIOInput(GPIO_PORTG_BASE, GPIO_PIN_2);
+    // Enable pin PA7 for GPIOInput
+    GPIOPinTypeGPIOInput(GPIO_PORTA_BASE, GPIO_PIN_7);
+    // Enable pin PC4 for GPIOInput
+    GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_4);
+
+    // Enable pin PA6 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_6);
+    // Enable pin PB6 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_6);
+    // Enable pin PB7 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_7);
+    // Enable pin PC7 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTC_BASE, GPIO_PIN_7);
+    // Enable pin PE0 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_0);
+    // Enable pin PE1 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_1);
+    // Enable pin PE2 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_2);
+    // Enable pin PE3 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_3);
+
+    // Enable pin PF4 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_4);
 
     /* Once GPIO_init is called, GPIO_config cannot be changed */
     GPIO_init();
@@ -372,46 +380,27 @@ const SPI_Config SPI_config[] = {
 void STC_SMPTE_initSPI(void)
 {
     SysCtlPeripheralEnable(SYSCTL_PERIPH_SSI0);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_SSI1);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_SSI2);
 
     /* === Configure and Enable SSI0 === */
 
-    // Enable pin PA4 for SSI0 SSI0RX
-    GPIOPinConfigure(GPIO_PA4_SSI0RX);
-    GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_4);
+    // Enable pin PA3 for SSI0 SSI0FSS
+    GPIOPinConfigure(GPIO_PA3_SSI0FSS);
+    GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_3);
+
     // Enable pin PA2 for SSI0 SSI0CLK
     GPIOPinConfigure(GPIO_PA2_SSI0CLK);
     GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_2);
+
     // Enable pin PA5 for SSI0 SSI0TX
     GPIOPinConfigure(GPIO_PA5_SSI0TX);
     GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_5);
 
-    /* === Configure and Enable SSI1 === */
-
-    // Enable pin PD2 for SSI1 SSI1RX
-    GPIOPinConfigure(GPIO_PD2_SSI1RX);
-    GPIOPinTypeSSI(GPIO_PORTD_BASE, GPIO_PIN_2);
-    // Enable pin PD3 for SSI1 SSI1TX
-    GPIOPinConfigure(GPIO_PD3_SSI1TX);
-    GPIOPinTypeSSI(GPIO_PORTD_BASE, GPIO_PIN_3);
-    // Enable pin PD0 for SSI1 SSI1CLK
-    GPIOPinConfigure(GPIO_PD0_SSI1CLK);
-    GPIOPinTypeSSI(GPIO_PORTD_BASE, GPIO_PIN_0);
-
-    /* === Configure and Enable SSI2 === */
-
-    // Enable pin PB7 for SSI2 SSI2TX
-    GPIOPinConfigure(GPIO_PB7_SSI2TX);
-    GPIOPinTypeSSI(GPIO_PORTB_BASE, GPIO_PIN_7);
-    // Enable pin PB4 for SSI2 SSI2CLK
-    GPIOPinConfigure(GPIO_PB4_SSI2CLK);
-    GPIOPinTypeSSI(GPIO_PORTB_BASE, GPIO_PIN_4);
-    // Enable pin PB6 for SSI2 SSI2RX
-    GPIOPinConfigure(GPIO_PB6_SSI2RX);
-    GPIOPinTypeSSI(GPIO_PORTB_BASE, GPIO_PIN_6);
+    // Enable pin PA4 for SSI0 SSI0RX
+    GPIOPinConfigure(GPIO_PA4_SSI0RX);
+    GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_4);
 
     STC_SMPTE_initDMA();
+
     SPI_init();
 }
 

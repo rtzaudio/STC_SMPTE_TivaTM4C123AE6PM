@@ -98,6 +98,10 @@ Int main()
     Error_Block eb;
     Task_Params taskParams;
 
+    Board_initGeneral();
+    Board_initGPIO();
+    Board_initSPI();
+
     /* Now start the main application button polling task */
 
     Error_init(&eb);
@@ -215,6 +219,7 @@ static Timer_Struct timer0Struct;
 
 Void SlaveTask(UArg a0, UArg a1)
 {
+    Timer_Handle hTimer;
     Timer_Params timerParams;
     Error_Block eb;
 
@@ -222,7 +227,8 @@ Void SlaveTask(UArg a0, UArg a1)
     memset(&g_sys, 0, sizeof(SYSPARMS));
 
     /* Read system parameters from EEPROM */
-    SysParamsRead(&g_sys);
+    //SysParamsRead(&g_sys);
+    InitSysDefaults(&g_sys);
 
     /* Configure a Timer to interrupt every 100ms
      * timerFunc() provides Hwi load and posts a Swi and Semaphore
@@ -231,26 +237,39 @@ Void SlaveTask(UArg a0, UArg a1)
 
     Timer_Params_init(&timerParams);
 
-    timerParams.startMode = Timer_StartMode_AUTO;
-    timerParams.period    = 100000;         /* 100,000 uSecs = 100ms */
+    timerParams.startMode  = Timer_StartMode_AUTO;
+    timerParams.period     = 250000;         /* 100,000 uSecs = 100ms */
+    timerParams.periodType = Timer_PeriodType_MICROSECS;
+    timerParams.arg        = 1;
 
-    Timer_construct(&timer0Struct, Timer_ANY, (Timer_FuncPtr)timerFunc, &timerParams, &eb);
+    Error_init(&eb);
+
+    hTimer = Timer_create(Timer_ANY, timerFunc, &timerParams, &eb);
+
+    if (hTimer == NULL) {
+        System_abort("Timer create failed");
+    }
 
     /****************************************************************
      * Enter the main application button processing loop forever.
      ****************************************************************/
 
+    Timer_start(hTimer);
+
     for(;;)
     {
+        /* No message, blink the LED */
+        //GPIO_toggle(Board_STAT_LED);
+
         /* delay for 5ms and loop */
-        Task_sleep(5);
+        Task_sleep(500);
     }
 }
 
 
 Void timerFunc(UArg arg)
 {
-
+    GPIO_toggle(Board_STAT_LED);
 }
 
 /* End-Of-File */

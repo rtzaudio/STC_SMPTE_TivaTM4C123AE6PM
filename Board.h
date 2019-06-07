@@ -42,18 +42,12 @@ extern "C" {
 #define Board_initGeneral           STC_SMPTE_initGeneral
 #define Board_initGPIO              STC_SMPTE_initGPIO
 #define Board_initSPI               STC_SMPTE_initSPI
-#define Board_initUART              STC_SMPTE_initUART
 #define Board_initWatchdog          STC_SMPTE_initWatchdog
 
-#define Board_SPI0                  STC_SMPTE_SPI0		// SSI-0 : SPI SUPPLY & TAKEUP SERVO DAC
-#define Board_SPI1                  STC_SMPTE_SPI1		// SSI-1 : SPI MCP23S17SO TRANSPORT SWITCHES & LAMPS
-#define Board_SPI2                  STC_SMPTE_SPI2		// SSI-2 : SPI MCP23S17SO SOLENOID, CONFIG DIP SWITCH & TAPE OUT
-
-#define Board_UART_IPC              STC_SMPTE_UART0		// RS-232 IPC on edge connector to timer/counter board
-#define Board_UART_TTY              STC_SMPTE_UART1		// RS-232 for TTY terminal console
-#define Board_UART_EXP              STC_SMPTE_UART5		// RS-232 on expansion port connector P1
+#define Board_SPI0                  STC_SMPTE_SPI0		// SSI-0 : SPI SLAVE
 
 #define Board_WATCHDOG0             STC_SMPTE_WATCHDOG0
+#define Board_STAT_LED              STC_SMPTE_STAT_LED
 
 #define Board_LED_ON                STC_SMPTE_LED_ON
 #define Board_LED_OFF               STC_SMPTE_LED_OFF
