@@ -79,8 +79,34 @@
 #include "Board.h"
 #include "STC_SMPTE.h"
 
+/* Constants */
+
+#define ONE_TIME_MAX          475   // these values are setup for NTSC video
+#define ONE_TIME_MIN          300   // PAL would be around 1000 for 0 and 500 for 1
+#define ZERO_TIME_MAX         875   // 80bits times 29.97 frames per sec
+#define ZERO_TIME_MIN         700   // equals 833 (divide by 8 clock pulses)
+
+#define END_DATA_POSITION      63
+#define END_SYNC_POSITION      77
+#define end_smpte_position     80
+
 /* Global Data Items */
+
 SYSPARMS g_sys;
+
+volatile unsigned int bit_time;
+volatile boolean valid_tc_word;
+volatile boolean ones_bit_count;
+volatile boolean tc_sync;
+volatile boolean write_tc_out;
+volatile boolean drop_frame_flag;
+
+volatile uchar8_t total_bits;
+volatile uchar8_t current_bit;
+volatile uchar8_t sync_count;
+
+volatile byte tc[8];
+volatile char timeCode[11];
 
 /* Static Function Prototypes */
 
@@ -275,14 +301,14 @@ Void timerFunc(UArg arg)
 #if 0
 
 #define icpPin 8        // ICP input pin on arduino
-#define one_time_max          475 // these values are setup for NTSC video
-#define one_time_min          300 // PAL would be around 1000 for 0 and 500 for 1
-#define zero_time_max         875 // 80bits times 29.97 frames per sec
-#define zero_time_min         700 // equals 833 (divide by 8 clock pulses)
+#define ONE_TIME_MAX          475 // these values are setup for NTSC video
+#define ONE_TIME_MIN          300 // PAL would be around 1000 for 0 and 500 for 1
+#define ZERO_TIME_MAX         875 // 80bits times 29.97 frames per sec
+#define ZERO_TIME_MIN         700 // equals 833 (divide by 8 clock pulses)
 
-#define end_data_position      63
-#define end_sync_position      77
-#define end_smpte_position     80
+#define END_DATA_POSITION      63
+#define END_SYNC_POSITION      77
+#define END_SMPTE_POSITION     80
 
 volatile unsigned int bit_time;
 volatile boolean valid_tc_word;
@@ -309,7 +335,7 @@ ISR(TIMER1_CAPT_vect)
  //resetTimer1
  TCNT1 = 0;
 
- if ((bit_time < one_time_min) || (bit_time > zero_time_max)) // get rid of anything way outside the norm
+ if ((bit_time < ONE_TIME_MIN) || (bit_time > ZERO_TIME_MAX)) // get rid of anything way outside the norm
  {
    //Serial.println(bit_time, DEC);
    total_bits = 0;
@@ -320,7 +346,7 @@ ISR(TIMER1_CAPT_vect)
      ones_bit_count = false;
    else
    {
-     if (bit_time > zero_time_min)
+     if (bit_time > ZERO_TIME_MIN)
      {
        current_bit = 0;
        sync_count = 0;
@@ -334,11 +360,11 @@ ISR(TIMER1_CAPT_vect)
        {
          sync_count = 0;
          tc_sync = true;
-         total_bits = end_sync_position;
+         total_bits = END_SYNC_POSITION;
        }
      }
 
-     if (total_bits <= end_data_position) // timecode runs least to most so we need
+     if (total_bits <= END_DATA_POSITION) // timecode runs least to most so we need
      {                                    // to shift things around
        tc[0] = tc[0] >> 1;
 
@@ -435,10 +461,10 @@ void loop()
 For pal: 25 and 24 Fps
 
 
-#define one_time_max          588 // these values are setup for NTSC video
-#define one_time_min          422 // PAL would be around 1000 for 0 and 500 for 1
-#define zero_time_max          1080 // 80bits times 29.97 frames per sec
-#define zero_time_min          922 // equals 833 (divide by 8 clock pulses)
+#define ONE_TIME_MAX          588 // these values are setup for NTSC video
+#define ONE_TIME_MIN          422 // PAL would be around 1000 for 0 and 500 for 1
+#define ZERO_TIME_MAX          1080 // 80bits times 29.97 frames per sec
+#define ZERO_TIME_MIN          922 // equals 833 (divide by 8 clock pulses)
 
 
 For User bit :
