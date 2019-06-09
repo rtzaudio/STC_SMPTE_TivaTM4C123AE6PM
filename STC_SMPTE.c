@@ -81,32 +81,34 @@
 
 /* Constants */
 
-#define ONE_TIME_MAX          475   // these values are setup for NTSC video
-#define ONE_TIME_MIN          300   // PAL would be around 1000 for 0 and 500 for 1
-#define ZERO_TIME_MAX         875   // 80bits times 29.97 frames per sec
-#define ZERO_TIME_MIN         700   // equals 833 (divide by 8 clock pulses)
+#define ONE_TIME_MAX            475     // these values are setup for NTSC video
+#define ONE_TIME_MIN            300     // PAL would be around 1000 for 0 and 500 for 1
+#define ZERO_TIME_MAX           875     // 80bits times 29.97 frames per sec
+#define ZERO_TIME_MIN           700     // equals 833 (divide by 8 clock pulses)
 
-#define END_DATA_POSITION      63
-#define END_SYNC_POSITION      77
-#define end_smpte_position     80
+#define END_DATA_POSITION       63
+#define END_SYNC_POSITION       77
+#define END_SMPTE_POSITION      80
 
 /* Global Data Items */
 
 SYSPARMS g_sys;
 
-volatile unsigned int bit_time;
-volatile boolean valid_tc_word;
-volatile boolean ones_bit_count;
-volatile boolean tc_sync;
-volatile boolean write_tc_out;
-volatile boolean drop_frame_flag;
+/* Static Data Items */
 
-volatile uchar8_t total_bits;
-volatile uchar8_t current_bit;
-volatile uchar8_t sync_count;
+volatile uint32_t bit_time;
+volatile bool valid_tc_word;
+volatile bool ones_bit_count;
+volatile bool tc_sync;
+volatile bool write_tc_out;
+volatile bool drop_frame_flag;
 
-volatile byte tc[8];
-volatile char timeCode[11];
+volatile uint8_t total_bits;
+volatile uint8_t current_bit;
+volatile uint8_t sync_count;
+
+volatile uint8_t tc[8];
+volatile int8_t timeCode[11];
 
 /* Static Function Prototypes */
 
@@ -300,30 +302,6 @@ Void timerFunc(UArg arg)
 
 #if 0
 
-#define icpPin 8        // ICP input pin on arduino
-#define ONE_TIME_MAX          475 // these values are setup for NTSC video
-#define ONE_TIME_MIN          300 // PAL would be around 1000 for 0 and 500 for 1
-#define ZERO_TIME_MAX         875 // 80bits times 29.97 frames per sec
-#define ZERO_TIME_MIN         700 // equals 833 (divide by 8 clock pulses)
-
-#define END_DATA_POSITION      63
-#define END_SYNC_POSITION      77
-#define END_SMPTE_POSITION     80
-
-volatile unsigned int bit_time;
-volatile boolean valid_tc_word;
-volatile boolean ones_bit_count;
-volatile boolean tc_sync;
-volatile boolean write_tc_out;
-volatile boolean drop_frame_flag;
-
-volatile byte total_bits;
-volatile byte current_bit;
-volatile byte sync_count;
-
-volatile byte tc[8];
-volatile char timeCode[11];
-
 /* ICR interrupt vector */
 ISR(TIMER1_CAPT_vect)
 {
@@ -465,7 +443,6 @@ For pal: 25 and 24 Fps
 #define ONE_TIME_MIN          422 // PAL would be around 1000 for 0 and 500 for 1
 #define ZERO_TIME_MAX          1080 // 80bits times 29.97 frames per sec
 #define ZERO_TIME_MIN          922 // equals 833 (divide by 8 clock pulses)
-
 
 For User bit :
 
