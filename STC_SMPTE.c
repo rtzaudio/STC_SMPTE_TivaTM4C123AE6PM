@@ -81,14 +81,6 @@
 
 /* Constants */
 
-#define ONE_TIME_MAX            475     // these values are setup for NTSC video
-#define ONE_TIME_MIN            300     // PAL would be around 1000 for 0 and 500 for 1
-#define ZERO_TIME_MAX           875     // 80bits times 29.97 frames per sec
-#define ZERO_TIME_MIN           700     // equals 833 (divide by 8 clock pulses)
-
-#define END_DATA_POSITION       63
-#define END_SYNC_POSITION       77
-#define END_SMPTE_POSITION      80
 
 /* Global Data Items */
 
