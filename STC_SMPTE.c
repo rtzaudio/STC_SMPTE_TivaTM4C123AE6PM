@@ -285,107 +285,110 @@ Void SlaveTask(UArg a0, UArg a1)
 }
 
 
+
 Void timerFunc(UArg arg)
 {
     GPIO_toggle(Board_STAT_LED);
+
+    // toggleCaptureEdge
+    //TCCR1B ^= _BV(ICES1);
+
+    //bit_time = ICR1;
+
+    // resetTimer1
+    //TCNT1 = 0;
+
+    // get rid of anything way outside the norm
+    if ((bit_time < ONE_TIME_MIN) || (bit_time > ZERO_TIME_MAX))
+    {
+        total_bits = 0;
+    }
+    else
+    {
+        // only count the second ones plus
+        if (ones_bit_count == true)
+        {
+            ones_bit_count = false;
+        }
+        else
+        {
+            if (bit_time > ZERO_TIME_MIN)
+            {
+                current_bit = 0;
+                sync_count = 0;
+            }
+            else //if (bit_time < one_time_max)
+            {
+                ones_bit_count = true;
+                current_bit = 1;
+
+                sync_count++;
+
+                if (sync_count == 12) // part of the last two bytes of a timecode word
+                {
+                    sync_count = 0;
+                    tc_sync = true;
+                    total_bits = END_SYNC_POSITION;
+                }
+            }
+
+            if (total_bits <= END_DATA_POSITION) // timecode runs least to most so we need
+            {                                    // to shift things around
+                int n;
+
+                tc[0] = tc[0] >> 1;
+
+                for(n=1; n < 8; n++)
+                {
+                    if(tc[n] & 1)
+                        tc[n-1] |= 0x80;
+
+                    tc[n] = tc[n] >> 1;
+                }
+
+                if (current_bit == 1)
+                    tc[7] |= 0x80;
+            }
+            total_bits++;
+        }
+
+        if (total_bits == END_SMPTE_POSITION)   // we have the 80th bit
+        {
+            total_bits = 0;
+
+            if (tc_sync)
+            {
+                tc_sync = false;
+                valid_tc_word = true;
+            }
+        }
+
+        if (valid_tc_word)
+        {
+            valid_tc_word = false;
+
+            timeCode[10] = (tc[0]&0x0F)+0x30;       // frames
+            timeCode[9]  = (tc[1]&0x03)+0x30;        // 10's of frames
+            timeCode[8]  =  '.';
+            timeCode[7]  = (tc[2]&0x0F)+0x30;        // seconds
+            timeCode[6]  = (tc[3]&0x07)+0x30;        // 10's of seconds
+            timeCode[5]  =  ':';
+            timeCode[4]  = (tc[4]&0x0F)+0x30;        // minutes
+            timeCode[3]  = (tc[5]&0x07)+0x30;        // 10's of minutes
+            timeCode[2]  = ':';
+            timeCode[1]  = (tc[6]&0x0F)+0x30;        // hours
+            timeCode[0]  = (tc[7]&0x03)+0x30;        // 10's of hours
+
+            //drop_frame_flag = bit_is_set(tc[1], 2);
+
+            write_tc_out = true;
+        }
+    }
 }
 
 
 
 #if 0
-
-/* ICR interrupt vector */
-ISR(TIMER1_CAPT_vect)
-{
- //toggleCaptureEdge
- TCCR1B ^= _BV(ICES1);
-
- bit_time = ICR1;
-
- //resetTimer1
- TCNT1 = 0;
-
- if ((bit_time < ONE_TIME_MIN) || (bit_time > ZERO_TIME_MAX)) // get rid of anything way outside the norm
- {
-   //Serial.println(bit_time, DEC);
-   total_bits = 0;
- }
- else
- {
-   if (ones_bit_count == true) // only count the second ones pluse
-     ones_bit_count = false;
-   else
-   {
-     if (bit_time > ZERO_TIME_MIN)
-     {
-       current_bit = 0;
-       sync_count = 0;
-     }
-     else //if (bit_time < one_time_max)
-     {
-       ones_bit_count = true;
-       current_bit = 1;
-       sync_count++;
-       if (sync_count == 12) // part of the last two bytes of a timecode word
-       {
-         sync_count = 0;
-         tc_sync = true;
-         total_bits = END_SYNC_POSITION;
-       }
-     }
-
-     if (total_bits <= END_DATA_POSITION) // timecode runs least to most so we need
-     {                                    // to shift things around
-       tc[0] = tc[0] >> 1;
-
-       for(int n=1;n<8;n++)
-       {
-         if(tc[n] & 1)
-           tc[n-1] |= 0x80;
-
-         tc[n] = tc[n] >> 1;
-       }
-
-       if(current_bit == 1)
-         tc[7] |= 0x80;
-     }
-     total_bits++;
-   }
-
-   if (total_bits == end_smpte_position) // we have the 80th bit
-   {
-     total_bits = 0;
-     if (tc_sync)
-     {
-       tc_sync = false;
-       valid_tc_word = true;
-     }
-   }
-
-   if (valid_tc_word)
-   {
-     valid_tc_word = false;
-
-     timeCode[10] = (tc[0]&0x0F)+0x30;      // frames
-     timeCode[9] = (tc[1]&0x03)+0x30;      // 10's of frames
-     timeCode[8] =  '.';
-     timeCode[7] = (tc[2]&0x0F)+0x30;      // seconds
-     timeCode[6] = (tc[3]&0x07)+0x30;      // 10's of seconds
-     timeCode[5] =  ':';
-     timeCode[4] = (tc[4]&0x0F)+0x30;      // minutes
-     timeCode[3] = (tc[5]&0x07)+0x30;      // 10's of minutes
-     timeCode[2] = ':';
-     timeCode[1] = (tc[6]&0x0F)+0x30;      // hours
-     timeCode[0] = (tc[7]&0x03)+0x30;      // 10's of hours
-
-     drop_frame_flag = bit_is_set(tc[1], 2);
-
-     write_tc_out = true;
-   }
- }
-}
-
-
 void setup()
 {
  beginSerial (115200);
@@ -430,7 +433,6 @@ void loop()
 
 For pal: 25 and 24 Fps
 
-
 #define ONE_TIME_MAX          588 // these values are setup for NTSC video
 #define ONE_TIME_MIN          422 // PAL would be around 1000 for 0 and 500 for 1
 #define ZERO_TIME_MAX          1080 // 80bits times 29.97 frames per sec
@@ -440,7 +442,7 @@ For User bit :
 
        userBit[9] = ((tc[0]&0xF0)>>4)+0x30; // user bits 8
        userBit[8] = ((tc[1]&0xF0)>>4)+0x30; // user bits 7
-       userBit[7] = ((tc[2]&0xF0)>>4)+0x30; // user bits 6
+       userBit[7] = ((tc[2]&0xF0)>>4)+0x 30; // user bits 6
        userBit[6] = ((tc[3]&0xF0)>>4)+0x30; // user bits 5
        userBit[5] = '-';
        userBit[4] = ((tc[4]&0xF0)>>4)+0x30; // user bits 4
