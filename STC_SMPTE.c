@@ -78,6 +78,7 @@
 /* XDCtools Header files */
 #include "Board.h"
 #include "STC_SMPTE.h"
+#include "Utils.h"
 
 /* Constants */
 
@@ -140,99 +141,7 @@ Int main()
 }
 
 //*****************************************************************************
-// Set default runtime values
-//*****************************************************************************
-
-void InitSysDefaults(SYSPARMS* p)
-{
-    /* default parameters */
-    p->version  = MAKEREV(FIRMWARE_VER, FIRMWARE_REV);
-    p->build    = FIRMWARE_BUILD;
-    p->debug    = 0;
-    p->sysflags = 0;
-}
-
-//*****************************************************************************
-// Write system parameters from our global settings buffer to EEPROM.
 //
-// Returns:  0 = Sucess
-//          -1 = Error writing EEPROM data
-//*****************************************************************************
-
-int32_t SysParamsWrite(SYSPARMS* sp)
-{
-    int32_t rc = 0;
-
-    sp->version = MAKEREV(FIRMWARE_VER, FIRMWARE_REV);
-    sp->build   = FIRMWARE_BUILD;
-    sp->magic   = MAGIC;
-
-    rc = EEPROMProgram((uint32_t *)sp, 0, sizeof(SYSPARMS));
-
-    System_printf("Writing System Parameters (size=%d)\n", sizeof(SYSPARMS));
-    System_flush();
-
-    return rc;
- }
-
-//*****************************************************************************
-// Read system parameters into our global settings buffer from EEPROM.
-//
-// Returns:  0 = Success
-//          -1 = Error reading flash
-//
-//*****************************************************************************
-
-int32_t SysParamsRead(SYSPARMS* sp)
-{
-    InitSysDefaults(sp);
-
-    EEPROMRead((uint32_t *)sp, 0, sizeof(SYSPARMS));
-
-    if (sp->magic != MAGIC)
-    {
-        System_printf("ERROR Reading System Parameters - Resetting Defaults...\n");
-        System_flush();
-
-        InitSysDefaults(sp);
-
-        SysParamsWrite(sp);
-
-        return -1;
-    }
-
-    if (sp->version != MAKEREV(FIRMWARE_VER, FIRMWARE_REV))
-    {
-        System_printf("WARNING New Firmware Version - Resetting Defaults...\n");
-        System_flush();
-
-        InitSysDefaults(sp);
-
-        SysParamsWrite(sp);
-
-        return -1;
-    }
-
-    if (sp->build < FIRMWARE_MIN_BUILD)
-    {
-        System_printf("WARNING New Firmware BUILD - Resetting Defaults...\n");
-        System_flush();
-
-        InitSysDefaults(sp);
-
-        SysParamsWrite(sp);
-
-        return -1;
-    }
-
-    System_printf("System Parameters Loaded (size=%d)\n", sizeof(SYSPARMS));
-    System_flush();
-
-    return 0;
-}
-
-//*****************************************************************************
-// The main application initialization, setup and button controler task.
 //*****************************************************************************
 
 Void SlaveTask(UArg a0, UArg a1)
@@ -290,105 +199,105 @@ Void timerFunc(UArg arg)
 {
     GPIO_toggle(Board_STAT_LED);
 
-    // toggleCaptureEdge
-    //TCCR1B ^= _BV(ICES1);
-
-    //bit_time = ICR1;
-
-    // resetTimer1
-    //TCNT1 = 0;
-
-    // get rid of anything way outside the norm
-    if ((bit_time < ONE_TIME_MIN) || (bit_time > ZERO_TIME_MAX))
-    {
-        total_bits = 0;
-    }
-    else
-    {
-        // only count the second ones plus
-        if (ones_bit_count == true)
-        {
-            ones_bit_count = false;
-        }
-        else
-        {
-            if (bit_time > ZERO_TIME_MIN)
-            {
-                current_bit = 0;
-                sync_count = 0;
-            }
-            else //if (bit_time < one_time_max)
-            {
-                ones_bit_count = true;
-                current_bit = 1;
-
-                sync_count++;
-
-                if (sync_count == 12) // part of the last two bytes of a timecode word
-                {
-                    sync_count = 0;
-                    tc_sync = true;
-                    total_bits = END_SYNC_POSITION;
-                }
-            }
-
-            if (total_bits <= END_DATA_POSITION) // timecode runs least to most so we need
-            {                                    // to shift things around
-                int n;
-
-                tc[0] = tc[0] >> 1;
-
-                for(n=1; n < 8; n++)
-                {
-                    if(tc[n] & 1)
-                        tc[n-1] |= 0x80;
-
-                    tc[n] = tc[n] >> 1;
-                }
-
-                if (current_bit == 1)
-                    tc[7] |= 0x80;
-            }
-            total_bits++;
-        }
-
-        if (total_bits == END_SMPTE_POSITION)   // we have the 80th bit
-        {
-            total_bits = 0;
-
-            if (tc_sync)
-            {
-                tc_sync = false;
-                valid_tc_word = true;
-            }
-        }
-
-        if (valid_tc_word)
-        {
-            valid_tc_word = false;
-
-            timeCode[10] = (tc[0]&0x0F)+0x30;       // frames
-            timeCode[9]  = (tc[1]&0x03)+0x30;        // 10's of frames
-            timeCode[8]  =  '.';
-            timeCode[7]  = (tc[2]&0x0F)+0x30;        // seconds
-            timeCode[6]  = (tc[3]&0x07)+0x30;        // 10's of seconds
-            timeCode[5]  =  ':';
-            timeCode[4]  = (tc[4]&0x0F)+0x30;        // minutes
-            timeCode[3]  = (tc[5]&0x07)+0x30;        // 10's of minutes
-            timeCode[2]  = ':';
-            timeCode[1]  = (tc[6]&0x0F)+0x30;        // hours
-            timeCode[0]  = (tc[7]&0x03)+0x30;        // 10's of hours
-
-            //drop_frame_flag = bit_is_set(tc[1], 2);
-
-            write_tc_out = true;
-        }
-    }
 }
 
 
 
 #if 0
+// toggleCaptureEdge
+//TCCR1B ^= _BV(ICES1);
+//bit_time = ICR1;
+// resetTimer1
+//TCNT1 = 0;
+
+// get rid of anything way outside the norm
+if ((bit_time < ONE_TIME_MIN) || (bit_time > ZERO_TIME_MAX))
+{
+    total_bits = 0;
+}
+else
+{
+    // only count the second ones plus
+    if (ones_bit_count == true)
+    {
+        ones_bit_count = false;
+    }
+    else
+    {
+        if (bit_time > ZERO_TIME_MIN)
+        {
+            current_bit = 0;
+            sync_count = 0;
+        }
+        else //if (bit_time < one_time_max)
+        {
+            ones_bit_count = true;
+            current_bit = 1;
+
+            sync_count++;
+
+            if (sync_count == 12) // part of the last two bytes of a timecode word
+            {
+                sync_count = 0;
+                tc_sync = true;
+                total_bits = END_SYNC_POSITION;
+            }
+        }
+
+        if (total_bits <= END_DATA_POSITION) // timecode runs least to most so we need
+        {                                    // to shift things around
+            int n;
+
+            tc[0] = tc[0] >> 1;
+
+            for(n=1; n < 8; n++)
+            {
+                if(tc[n] & 1)
+                    tc[n-1] |= 0x80;
+
+                tc[n] = tc[n] >> 1;
+            }
+
+            if (current_bit == 1)
+                tc[7] |= 0x80;
+        }
+        total_bits++;
+    }
+
+    if (total_bits == END_SMPTE_POSITION)   // we have the 80th bit
+    {
+        total_bits = 0;
+
+        if (tc_sync)
+        {
+            tc_sync = false;
+            valid_tc_word = true;
+        }
+    }
+
+    if (valid_tc_word)
+    {
+        valid_tc_word = false;
+
+        timeCode[10] = (tc[0]&0x0F)+0x30;       // frames
+        timeCode[9]  = (tc[1]&0x03)+0x30;        // 10's of frames
+        timeCode[8]  =  '.';
+        timeCode[7]  = (tc[2]&0x0F)+0x30;        // seconds
+        timeCode[6]  = (tc[3]&0x07)+0x30;        // 10's of seconds
+        timeCode[5]  =  ':';
+        timeCode[4]  = (tc[4]&0x0F)+0x30;        // minutes
+        timeCode[3]  = (tc[5]&0x07)+0x30;        // 10's of minutes
+        timeCode[2]  = ':';
+        timeCode[1]  = (tc[6]&0x0F)+0x30;        // hours
+        timeCode[0]  = (tc[7]&0x03)+0x30;        // 10's of hours
+
+        //drop_frame_flag = bit_is_set(tc[1], 2);
+
+        write_tc_out = true;
+    }
+}
+
+
 void setup()
 {
  beginSerial (115200);

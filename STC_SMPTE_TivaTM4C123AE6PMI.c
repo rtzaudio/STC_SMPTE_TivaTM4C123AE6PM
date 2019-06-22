@@ -147,14 +147,6 @@ void STC_SMPTE_initGeneral(void)
     uint32_t size = EEPROMSizeGet();
 }
 
-#if 0
-PortFunctionInit(void)
-{
-
-
-
-#endif
-
 /*
  *  =============================== GPIO ===============================
  */
