@@ -54,8 +54,8 @@
 #include <ti/sysbios/knl/Task.h>
 #include <ti/sysbios/knl/Clock.h>
 #include <ti/sysbios/knl/Queue.h>
-
-#include <ti/sysbios/hal/Timer.h>
+//#include <ti/sysbios/hal/Timer.h>
+#include <ti/sysbios/family/arm/m3/Hwi.h>
 
 /* TI-RTOS Driver files */
 #include <ti/drivers/GPIO.h>
@@ -103,12 +103,16 @@ volatile uint8_t sync_count;
 volatile uint8_t tc[8];
 volatile int8_t timeCode[11];
 
+uint32_t g_systemClock;
+
 /* Static Function Prototypes */
 
 Int main();
+void Timer_Start();
+void Timer_Stop(void);
 Void SlaveTask(UArg a0, UArg a1);
-
-Void timerFunc(UArg arg);
+Void Timer1AIntHandler(UArg arg);
+Void Timer1BIntHandler(UArg arg);
 
 //*****************************************************************************
 // Main Program Entry Point
@@ -119,6 +123,8 @@ Int main()
     Error_Block eb;
     Task_Params taskParams;
 
+    g_systemClock = SysCtlClockGet();
+
     Board_initGeneral();
     Board_initGPIO();
     Board_initSPI();
@@ -126,10 +132,8 @@ Int main()
     /* Now start the main application button polling task */
 
     Error_init(&eb);
-
     Task_Params_init(&taskParams);
-
-    taskParams.stackSize = 1248;
+    taskParams.stackSize = 1500;
     taskParams.priority  = 10;
 
     if (Task_create(SlaveTask, &taskParams, &eb) == NULL)
@@ -146,9 +150,8 @@ Int main()
 
 Void SlaveTask(UArg a0, UArg a1)
 {
-    Timer_Handle hTimer;
-    Timer_Params timerParams;
-    Error_Block eb;
+    SPI_Params spiParams;
+    SPI_Handle hSlave;
 
     /* Initialize the default servo and program data values */
     memset(&g_sys, 0, sizeof(SYSPARMS));
@@ -157,50 +160,145 @@ Void SlaveTask(UArg a0, UArg a1)
     //SysParamsRead(&g_sys);
     InitSysDefaults(&g_sys);
 
-    /* Configure a Timer to interrupt every 100ms
-     * timerFunc() provides Hwi load and posts a Swi and Semaphore
-     * to provide Swi and Task loads and adjusts the loads every 5 seconds.
+    /* Open SLAVE SPI port from STC motherboard
+     * 1 Mhz, Moto fmt, polarity 1, phase 0
      */
 
-    Timer_Params_init(&timerParams);
+    SPI_Params_init(&spiParams);
+    spiParams.transferMode  = SPI_MODE_BLOCKING;
+    spiParams.mode          = SPI_SLAVE;
+    spiParams.frameFormat   = SPI_POL1_PHA0;
+    spiParams.bitRate       = 250000;
+    spiParams.dataSize      = 16;
+    spiParams.transferCallbackFxn = NULL;
 
-    timerParams.startMode  = Timer_StartMode_AUTO;
-    timerParams.period     = 250000;         /* 100,000 uSecs = 100ms */
-    timerParams.periodType = Timer_PeriodType_MICROSECS;
-    timerParams.arg        = 1;
+    hSlave = SPI_open(STC_SMPTE_SPI0, &spiParams);
 
-    Error_init(&eb);
-
-    hTimer = Timer_create(Timer_ANY, timerFunc, &timerParams, &eb);
-
-    if (hTimer == NULL) {
-        System_abort("Timer create failed");
-    }
+    if (hSlave == NULL)
+        System_abort("Error initializing SPI0\n");
 
     /****************************************************************
      * Enter the main application button processing loop forever.
      ****************************************************************/
 
-    Timer_start(hTimer);
+    /* Map the timer interrupt handlers. We don't make sys/bios calls
+     * from these interrupt handlers and there is no need to create a
+     * context handler with stack swapping for these. These handlers
+     * just update some globals variables and need to execute as
+     * quickly and efficiently as possible.
+     */
+    Hwi_plug(INT_WTIMER1A, Timer1AIntHandler);
+    Hwi_plug(INT_WTIMER1B, Timer1BIntHandler);
+
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
+
+    // Configure TIMER1B as a 16-bit periodic timer.
+    TimerConfigure(WTIMER1_BASE, TIMER_CFG_PERIODIC);
+
+    // Set the TIMER1B load value to 1ms.
+    TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock / 4800);
+
+    //Timer_Start();
 
     for(;;)
     {
-        /* No message, blink the LED */
-        //GPIO_toggle(Board_STAT_LED);
+        bool success;
+        uint16_t ulCommand;
+        uint16_t ulReply = 0;
+        SPI_Transaction transaction;
 
-        /* delay for 5ms and loop */
-        Task_sleep(500);
+        transaction.count = 1;
+        transaction.rxBuf = (Ptr)&ulCommand;
+        transaction.txBuf = (Ptr)&ulReply;
+
+        /* Send the SPI transaction */
+        success = SPI_transfer(hSlave, &transaction);
+
+        if (!success)
+        {
+            System_printf("SPI slave rx failed\n");
+            System_flush();
+        }
+        else
+        {
+            //System_printf("SPI slave rx %04x\n", ulCommand);
+            //System_flush();
+
+            switch(ulCommand)
+            {
+            case 0xFE21:
+                Timer_Start();
+                break;
+
+            case 0xFE20:
+                Timer_Stop();
+                break;
+            }
+        }
     }
 }
 
 
-
-Void timerFunc(UArg arg)
+void Timer_Start(void)
 {
-    GPIO_toggle(Board_STAT_LED);
+    /* Enable the signal out relay to connect the SMPTE
+     * output signal to channel 24 on the tape machine.
+     */
+    GPIO_write(Board_RELAY, Board_RELAY_ON);
+    Task_sleep(100);
+    GPIO_write(Board_STAT_LED, Board_LED_ON);
 
+    // Enable processor interrupts.
+    //IntMasterEnable();
+
+    // Configure the TIMER1B interrupt for timer timeout.
+    TimerIntEnable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
+
+    // Enable the TIMER1B interrupt on the processor (NVIC).
+    IntEnable(INT_WTIMER1A);
+
+    // Enable TIMER1A.
+    TimerEnable(WTIMER1_BASE, TIMER_A);
 }
 
+void Timer_Stop(void)
+{
+    // Disable TIMER1B.
+    TimerDisable(WTIMER1_BASE, TIMER_A);
+
+    // Disable the TIMER1B interrupt.
+    IntDisable(INT_WTIMER1B);
+
+    // Turn off TIMER1B interrupt.
+    TimerIntDisable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
+
+    // Clear any pending interrupt flag.
+    TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
+
+    GPIO_write(Board_SMPTE_OUT, PIN_LOW);
+    Task_sleep(100);
+    GPIO_write(Board_RELAY, Board_RELAY_OFF);
+    GPIO_write(Board_STAT_LED, Board_LED_OFF);
+}
+
+//*****************************************************************************
+// WTIMER INTERRUPT HANDLERS
+//*****************************************************************************
+
+Void Timer1AIntHandler(UArg arg)
+{
+    // Clear the timer interrupt flag.
+    TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
+
+    GPIO_toggle(Board_SMPTE_OUT);
+}
+
+
+Void Timer1BIntHandler(UArg arg)
+{
+    // Clear the timer interrupt flag.
+    TimerIntClear(WTIMER1_BASE, TIMER_TIMB_TIMEOUT);
+}
 
 
 #if 0

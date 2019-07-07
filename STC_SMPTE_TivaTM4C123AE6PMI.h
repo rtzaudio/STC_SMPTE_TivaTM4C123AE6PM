@@ -52,11 +52,14 @@ extern "C" {
 #include <ti/drivers/GPIO.h>
 
 /* LEDs on STC_SMPTE are active high. */
-#define STC_SMPTE_LED_OFF   ( 0)
-#define STC_SMPTE_LED_ON    (~0)
+#define STC_SMPTE_LED_OFF       ( 0)
+#define STC_SMPTE_LED_ON        (~0)
 
-#define PIN_LOW			    ( 0)
-#define PIN_HIGH		    (~0)
+#define STC_SMPTE_RELAY_OFF     ( 0)
+#define STC_SMPTE_RELAY_ON      (~0)
+
+#define PIN_LOW			        ( 0)
+#define PIN_HIGH		        (~0)
 
 /*** STC-SMPTE HARDWARE CONSTANTS *********************************************/
 
@@ -70,16 +73,17 @@ extern "C" {
  *  @brief  Enum of LED names on the STC_SMPTE dev board
  */
 typedef enum STC_SMPTE_GPIOName {
-    STC_SMPTE_BOOTLOAD = 0,         /* 0 = PA7 */
-    STC_SMPTE_IN,                   /* 1 = PC4 */
-	STC_SMPTE_INT_N,	            /* 2 = PA6 */
-    STC_SMPTE_OUT,                  /* 3 = PB6 */
-    STC_SMPTE_MUTE,                 /* 4 = PB7 */
-	STC_SMPTE_STAT_LED,             /* 5 = PC7 */
-	STC_SMPTE_SLOWCODE,             /* 6 = PE0 */
-    STC_SMPTE_FRAMESYNC,            /* 7 = PE1 */
-    STC_SMPTE_DIRECTION,            /* 8 = PE2 */
-    STC_SMPTE_CHANGE,               /* 9 = PE3 */
+    STC_SMPTE_BOOTLOAD = 0,         /* 0  = PA7 */
+    STC_SMPTE_IN,                   /* 1  = PC4 */
+	STC_SMPTE_INT_N,	            /* 2  = PA6 */
+    STC_SMPTE_OUT,                  /* 3  = PB6 */
+    STC_SMPTE_MUTE,                 /* 4  = PB7 */
+	STC_SMPTE_STAT_LED,             /* 5  = PC7 */
+	STC_SMPTE_SLOWCODE,             /* 6  = PE0 */
+    STC_SMPTE_FRAMESYNC,            /* 7  = PE1 */
+    STC_SMPTE_DIRECTION,            /* 8  = PE2 */
+    STC_SMPTE_CHANGE,               /* 9  = PE3 */
+    STC_SMPTE_RELAY,                /* 10 = PF4 */
 
     STC_SMPTE_GPIOCOUNT
 } STC_SMPTE_GPIOName;
@@ -111,7 +115,7 @@ typedef enum STC_SMPTE_PWMName {
  *  @brief  Enum of SPI names on the STC_SMPTE dev board
  */
 typedef enum STC_SMPTE_SPIName {
-    STC_SMPTE_SPI0 = 0,		/* SUPPLY & TAKEUP SERVO DAC */
+    STC_SMPTE_SPI0 = 0,
 
     STC_SMPTE_SPICOUNT
 } STC_SMPTE_SPIName;

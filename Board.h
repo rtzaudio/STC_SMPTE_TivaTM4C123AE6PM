@@ -56,11 +56,14 @@ extern "C" {
 #define Board_FRAME_SYNC            STC_SMPTE_FRAMESYNC     /* 7 = PE1 */
 #define Board_DIRECTION             STC_SMPTE_DIRECTION     /* 8 = PE2 */
 #define Board_CHANGE                STC_SMPTE_CHANGE
-
+#define Board_RELAY                 STC_SMPTE_RELAY
 #define Board_WATCHDOG0             STC_SMPTE_WATCHDOG0
 
 #define Board_LED_ON                STC_SMPTE_LED_ON
 #define Board_LED_OFF               STC_SMPTE_LED_OFF
+
+#define Board_RELAY_ON              STC_SMPTE_RELAY_ON
+#define Board_RELAY_OFF             STC_SMPTE_RELAY_OFF
 
 /* GPIO Pin Mappings */
 #define Board_CS_SPI0				STC_SMPTE_SSI0FSS				/* PA3 */

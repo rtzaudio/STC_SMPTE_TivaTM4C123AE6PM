@@ -192,7 +192,10 @@ GPIO_PinConfig gpioPinConfigs[] = {
     /* (8) STC_SMPTE_DIRECTION */
     GPIOTiva_PE_2 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW,
     /* (9) STC_SMPTE_CHANGE */
-    GPIOTiva_PE_3 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW
+    GPIOTiva_PE_3 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW,
+    /* (10) STC_SMPTE_RELAY */
+    GPIOTiva_PF_4 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW
+
 };
 
 /*
@@ -362,7 +365,6 @@ const SPITivaDMA_HWAttrs spiTivaDMAHWAttrs[STC_SMPTE_SPICOUNT] = {
 
 const SPI_Config SPI_config[] = {
     {&SPITivaDMA_fxnTable, &spiTivaDMAObjects[0], &spiTivaDMAHWAttrs[0]},
-    {&SPITivaDMA_fxnTable, &spiTivaDMAObjects[1], &spiTivaDMAHWAttrs[1]},
     {NULL, NULL, NULL},
 };
 
@@ -378,15 +380,12 @@ void STC_SMPTE_initSPI(void)
     // Enable pin PA3 for SSI0 SSI0FSS
     GPIOPinConfigure(GPIO_PA3_SSI0FSS);
     GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_3);
-
     // Enable pin PA2 for SSI0 SSI0CLK
     GPIOPinConfigure(GPIO_PA2_SSI0CLK);
     GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_2);
-
     // Enable pin PA5 for SSI0 SSI0TX
     GPIOPinConfigure(GPIO_PA5_SSI0TX);
     GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_5);
-
     // Enable pin PA4 for SSI0 SSI0RX
     GPIOPinConfigure(GPIO_PA4_SSI0RX);
     GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_4);
