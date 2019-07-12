@@ -79,9 +79,10 @@
 #include "Board.h"
 #include "STC_SMPTE.h"
 #include "Utils.h"
+#include "libltc\ltc.h"
+#include "libltc\encoder.h"
 
 /* Constants */
-
 
 /* Global Data Items */
 
@@ -89,27 +90,28 @@ SYSPARMS g_sys;
 
 /* Static Data Items */
 
-volatile uint32_t bit_time;
-volatile bool valid_tc_word;
-volatile bool ones_bit_count;
-volatile bool tc_sync;
-volatile bool write_tc_out;
-volatile bool drop_frame_flag;
-
-volatile uint8_t total_bits;
-volatile uint8_t current_bit;
-volatile uint8_t sync_count;
-
-volatile uint8_t tc[8];
-volatile int8_t timeCode[11];
-
 uint32_t g_systemClock;
+
+/* SMPTE Data Items */
+
+double length = 2.0; // in seconds
+double fps = 25.0;
+double sampleRate = 48000.0;
+
+int total = 0;
+int vframe_cnt;
+int vframe_last;
+
+LTCEncoder *encoder = NULL;
+SMPTETimecode st;
+
+const char timezone[6] = "+0100";
 
 /* Static Function Prototypes */
 
 Int main();
-void Timer_Start();
-void Timer_Stop(void);
+void SMPTE_Start();
+void SMPTE_Stop(void);
 Void SlaveTask(UArg a0, UArg a1);
 Void Timer1AIntHandler(UArg arg);
 Void Timer1BIntHandler(UArg arg);
@@ -198,7 +200,7 @@ Void SlaveTask(UArg a0, UArg a1)
     // Set the TIMER1B load value to 1ms.
     TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock / 4800);
 
-    //Timer_Start();
+    //SMPTE_Start();
 
     for(;;)
     {
@@ -227,11 +229,11 @@ Void SlaveTask(UArg a0, UArg a1)
             switch(ulCommand)
             {
             case 0xFE21:
-                Timer_Start();
+                SMPTE_Start();
                 break;
 
             case 0xFE20:
-                Timer_Stop();
+                SMPTE_Stop();
                 break;
             }
         }
@@ -239,8 +241,45 @@ Void SlaveTask(UArg a0, UArg a1)
 }
 
 
-void Timer_Start(void)
+void SMPTE_Start(void)
 {
+    if (encoder)
+        return;
+
+    strcpy(st.timezone, timezone);
+
+    st.years  =  8;
+    st.months = 12;
+    st.days   =   31;
+
+    st.hours  = 23;
+    st.mins   = 59;
+    st.secs   = 59;
+    st.frame  = 0;
+
+    encoder = ltc_encoder_create(1.0, 1.0, 0, LTC_USE_DATE);
+
+    ltc_encoder_set_bufsize(encoder, sampleRate, fps);
+
+    enum LTC_TV_STANDARD standard = (fps == 25) ? LTC_TV_625_50 : LTC_TV_525_60;
+
+    ltc_encoder_reinit(encoder, sampleRate, fps, standard, LTC_USE_DATE);
+
+    ltc_encoder_set_filter(encoder, 0);
+    ltc_encoder_set_filter(encoder, 25.0);
+    ltc_encoder_set_volume(encoder, -18.0);
+
+    ltc_encoder_set_timecode(encoder, &st);
+
+    //System_printf("sample rate: %0.2f\n", sampleRate);
+    //System_printf("frames/sec: %0.2f\n", fps);
+    //System_printf("secs to write: %0.2f\n", length);
+    //System_printf("sample format: 8bit unsigned mono\n");
+    //System_flush();
+
+    vframe_cnt = 0;
+    vframe_last = length * fps;
+
     /* Enable the signal out relay to connect the SMPTE
      * output signal to channel 24 on the tape machine.
      */
@@ -250,28 +289,28 @@ void Timer_Start(void)
 
     // Enable processor interrupts.
     //IntMasterEnable();
-
     // Configure the TIMER1B interrupt for timer timeout.
     TimerIntEnable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
     // Enable the TIMER1B interrupt on the processor (NVIC).
     IntEnable(INT_WTIMER1A);
-
     // Enable TIMER1A.
     TimerEnable(WTIMER1_BASE, TIMER_A);
 }
 
-void Timer_Stop(void)
+void SMPTE_Stop(void)
 {
-    // Disable TIMER1B.
+    if (encoder)
+    {
+        ltc_encoder_free(encoder);
+        encoder = NULL;
+    }
+
+    // Disable TIMER1A.
     TimerDisable(WTIMER1_BASE, TIMER_A);
-
-    // Disable the TIMER1B interrupt.
-    IntDisable(INT_WTIMER1B);
-
+    // Disable the TIMER1A interrupt.
+    IntDisable(INT_WTIMER1A);
     // Turn off TIMER1B interrupt.
     TimerIntDisable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
     // Clear any pending interrupt flag.
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
 
@@ -290,7 +329,24 @@ Void Timer1AIntHandler(UArg arg)
     // Clear the timer interrupt flag.
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
 
-    GPIO_toggle(Board_SMPTE_OUT);
+    if  (vframe_cnt++ < vframe_last)
+    {
+        int len;
+        ltcsnd_sample_t *buf;
+
+        ltc_encoder_encode_frame(encoder);
+
+        buf = ltc_encoder_get_bufptr(encoder, &len, 1);
+
+        if (len > 0) {
+                //fwrite(buf, sizeof(ltcsnd_sample_t), len, file);
+                total += len;
+        }
+
+        GPIO_toggle(Board_SMPTE_OUT);
+
+        ltc_encoder_inc_timecode(encoder);
+    }
 }
 
 
@@ -302,6 +358,23 @@ Void Timer1BIntHandler(UArg arg)
 
 
 #if 0
+
+
+volatile uint32_t bit_time;
+volatile bool valid_tc_word;
+volatile bool ones_bit_count;
+volatile bool tc_sync;
+volatile bool write_tc_out;
+volatile bool drop_frame_flag;
+
+volatile uint8_t total_bits;
+volatile uint8_t current_bit;
+volatile uint8_t sync_count;
+
+volatile uint8_t tc[8];
+volatile int8_t timeCode[11];
+
+
 // toggleCaptureEdge
 //TCCR1B ^= _BV(ICES1);
 //bit_time = ICR1;
