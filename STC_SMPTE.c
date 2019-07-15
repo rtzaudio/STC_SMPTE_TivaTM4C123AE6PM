@@ -94,16 +94,14 @@ uint32_t g_systemClock;
 
 /* SMPTE Data Items */
 
-double length = 2.0; // in seconds
-double fps = 25.0;
-double sampleRate = 48000.0;
+bool running = false;
+SMPTETimecode g_smpte_time;
+LTCFrame g_smpte_frame;
+LTCFrame g_smpte_ones;
+LTCFrame g_smpte_zeros;
 
-int total = 0;
-int vframe_cnt;
-int vframe_last;
-
-LTCEncoder *encoder = NULL;
-SMPTETimecode st;
+volatile int8_t g_state = 0;
+volatile uint32_t g_frame_bitnum = 0;
 
 const char timezone[6] = "+0100";
 
@@ -197,9 +195,6 @@ Void SlaveTask(UArg a0, UArg a1)
     // Configure TIMER1B as a 16-bit periodic timer.
     TimerConfigure(WTIMER1_BASE, TIMER_CFG_PERIODIC);
 
-    // Set the TIMER1B load value to 1ms.
-    TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock / 4800);
-
     //SMPTE_Start();
 
     for(;;)
@@ -243,52 +238,42 @@ Void SlaveTask(UArg a0, UArg a1)
 
 void SMPTE_Start(void)
 {
-    if (encoder)
-        return;
+    //if (encoder)
+    //    return;
+    strcpy(g_smpte_time.timezone, timezone);
 
-    strcpy(st.timezone, timezone);
+    //g_smpte_time.years  = 8;
+    //g_smpte_time.months = 12;
+    //g_smpte_time.days   = 31;
 
-    st.years  =  8;
-    st.months = 12;
-    st.days   =   31;
+    g_smpte_time.hours  = 23;
+    g_smpte_time.mins   = 59;
+    g_smpte_time.secs   = 59;
+    g_smpte_time.frame  = 0;
 
-    st.hours  = 23;
-    st.mins   = 59;
-    st.secs   = 59;
-    st.frame  = 0;
+    memset(&g_smpte_ones, 0xFF, sizeof(LTCFrame));
+    memset(&g_smpte_zeros, 0x00, sizeof(LTCFrame));
 
-    encoder = ltc_encoder_create(1.0, 1.0, 0, LTC_USE_DATE);
+    ltc_frame_reset(&g_smpte_frame);
 
-    ltc_encoder_set_bufsize(encoder, sampleRate, fps);
+    ltc_time_to_frame(&g_smpte_frame, &g_smpte_time, LTC_TV_525_60, 0);
 
-    enum LTC_TV_STANDARD standard = (fps == 25) ? LTC_TV_625_50 : LTC_TV_525_60;
-
-    ltc_encoder_reinit(encoder, sampleRate, fps, standard, LTC_USE_DATE);
-
-    ltc_encoder_set_filter(encoder, 0);
-    ltc_encoder_set_filter(encoder, 25.0);
-    ltc_encoder_set_volume(encoder, -18.0);
-
-    ltc_encoder_set_timecode(encoder, &st);
-
-    //System_printf("sample rate: %0.2f\n", sampleRate);
-    //System_printf("frames/sec: %0.2f\n", fps);
-    //System_printf("secs to write: %0.2f\n", length);
-    //System_printf("sample format: 8bit unsigned mono\n");
-    //System_flush();
-
-    vframe_cnt = 0;
-    vframe_last = length * fps;
+    g_state = g_frame_bitnum = 0;
 
     /* Enable the signal out relay to connect the SMPTE
      * output signal to channel 24 on the tape machine.
      */
     GPIO_write(Board_RELAY, Board_RELAY_ON);
     Task_sleep(100);
+
+    // Turn the LED on to indicate active
     GPIO_write(Board_STAT_LED, Board_LED_ON);
 
-    // Enable processor interrupts.
-    //IntMasterEnable();
+    // SMPTE output pin low initially
+    GPIO_write(Board_SMPTE_OUT, PIN_LOW);
+
+    // Set the TIMER1B load value to 1ms.
+    TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock / 4800);  //4800);
     // Configure the TIMER1B interrupt for timer timeout.
     TimerIntEnable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
     // Enable the TIMER1B interrupt on the processor (NVIC).
@@ -297,14 +282,9 @@ void SMPTE_Start(void)
     TimerEnable(WTIMER1_BASE, TIMER_A);
 }
 
+
 void SMPTE_Stop(void)
 {
-    if (encoder)
-    {
-        ltc_encoder_free(encoder);
-        encoder = NULL;
-    }
-
     // Disable TIMER1A.
     TimerDisable(WTIMER1_BASE, TIMER_A);
     // Disable the TIMER1A interrupt.
@@ -313,9 +293,10 @@ void SMPTE_Stop(void)
     TimerIntDisable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
     // Clear any pending interrupt flag.
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
-    GPIO_write(Board_SMPTE_OUT, PIN_LOW);
     Task_sleep(100);
+    // SMPTE output pin low
+    GPIO_write(Board_SMPTE_OUT, PIN_LOW);
+    // Relay and LED off
     GPIO_write(Board_RELAY, Board_RELAY_OFF);
     GPIO_write(Board_STAT_LED, Board_LED_OFF);
 }
@@ -329,26 +310,67 @@ Void Timer1AIntHandler(UArg arg)
     // Clear the timer interrupt flag.
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
 
-    if  (vframe_cnt++ < vframe_last)
+    uint8_t* pframe = (uint8_t*)&g_smpte_frame;
+    uint8_t data;
+    uint32_t i, s;
+
+    switch(g_state)
     {
-        int len;
-        ltcsnd_sample_t *buf;
-
-        ltc_encoder_encode_frame(encoder);
-
-        buf = ltc_encoder_get_bufptr(encoder, &len, 1);
-
-        if (len > 0) {
-                //fwrite(buf, sizeof(ltcsnd_sample_t), len, file);
-                total += len;
-        }
-
+    case 0:
         GPIO_toggle(Board_SMPTE_OUT);
+        ++g_state;
+        break;
 
-        ltc_encoder_inc_timecode(encoder);
+    case 1:
+        i = g_frame_bitnum / 8;
+        s = g_frame_bitnum % 8;
+
+        data = pframe[i];
+
+        if ((data >> s) & 0x01)
+        {
+            GPIO_toggle(Board_SMPTE_OUT);
+            g_state = 5;
+        }
+        else
+        {
+            g_state = 3;
+        }
+        break;
+
+    case 2:
+        GPIO_toggle(Board_SMPTE_OUT);
+        ++g_state;
+        break;
+
+    case 3:
+        GPIO_toggle(Board_SMPTE_OUT);
+        ++g_state;
+        break;
+
+    case 5:
+        GPIO_toggle(Board_SMPTE_OUT);
+        ++g_state;
+        break;
+
+    case 6:
+        GPIO_toggle(Board_SMPTE_OUT);
+    case 4:
+        ++g_frame_bitnum;
+        /* Is this the last bit of the SMPTE frame? */
+        if (g_frame_bitnum >= LTC_FRAME_BIT_COUNT)
+        {
+            /* Yes, then increment the frame time code step */
+            ltc_frame_increment(&g_smpte_frame, 30, LTC_TV_625_50, 0);
+
+            /* reset the frame bit counter */
+            g_frame_bitnum = 0;
+
+            GPIO_toggle(Board_STAT_LED);
+        }
+        g_state = 0;
     }
 }
-
 
 Void Timer1BIntHandler(UArg arg)
 {
