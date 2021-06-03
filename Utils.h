@@ -12,9 +12,9 @@
 #ifndef __UTILS_H__
 #define __UTILS_H__
 
-void InitSysDefaults(SYSPARMS* p);
-int32_t SysParamsWrite(SYSPARMS* sp);
-int32_t SysParamsRead(SYSPARMS* sp);
+void InitSysDefaults(SYSCFG* p);
+int32_t SysParamsWrite(SYSCFG* sp);
+int32_t SysParamsRead(SYSCFG* sp);
 
 #endif /* __UTILS_H__ */
 

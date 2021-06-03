@@ -118,7 +118,7 @@
  * stored and read from EEPROM. The structure size must be 4 byte aligned.
  */
 
-typedef struct _SYSPARMS
+typedef struct _SYSCFG
 {
 	uint32_t magic;
 	uint32_t version;
@@ -126,13 +126,13 @@ typedef struct _SYSPARMS
     /*** GLOBAL PARAMETERS ***/
 	uint32_t debug;
     uint32_t sysflags;
-} SYSPARMS;
+} SYSCFG;
 
 /*** Macros & Function Prototypes ******************************************/
 
 /* main.c */
-void InitSysDefaults(SYSPARMS* p);
-int32_t SysParamsWrite(SYSPARMS* sp);
-int32_t SysParamsRead(SYSPARMS* sp);
+void InitSysDefaults(SYSCFG* p);
+int32_t SysParamsWrite(SYSCFG* sp);
+int32_t SysParamsRead(SYSCFG* sp);
 
 /* End-Of-File */

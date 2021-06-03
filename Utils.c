@@ -84,13 +84,13 @@
 
 /* External Data Items */
 
-extern SYSPARMS g_sys;
+extern SYSCFG g_sys;
 
 //*****************************************************************************
 // Set default runtime values
 //*****************************************************************************
 
-void InitSysDefaults(SYSPARMS* p)
+void InitSysDefaults(SYSCFG* p)
 {
     /* default parameters */
     p->version  = MAKEREV(FIRMWARE_VER, FIRMWARE_REV);
@@ -106,7 +106,7 @@ void InitSysDefaults(SYSPARMS* p)
 //          -1 = Error writing EEPROM data
 //*****************************************************************************
 
-int32_t SysParamsWrite(SYSPARMS* sp)
+int32_t SysParamsWrite(SYSCFG* sp)
 {
     int32_t rc = 0;
 
@@ -114,9 +114,9 @@ int32_t SysParamsWrite(SYSPARMS* sp)
     sp->build   = FIRMWARE_BUILD;
     sp->magic   = MAGIC;
 
-    rc = EEPROMProgram((uint32_t *)sp, 0, sizeof(SYSPARMS));
+    rc = EEPROMProgram((uint32_t *)sp, 0, sizeof(SYSCFG));
 
-    System_printf("Writing System Parameters (size=%d)\n", sizeof(SYSPARMS));
+    System_printf("Writing System Parameters (size=%d)\n", sizeof(SYSCFG));
     System_flush();
 
     return rc;
@@ -130,11 +130,11 @@ int32_t SysParamsWrite(SYSPARMS* sp)
 //
 //*****************************************************************************
 
-int32_t SysParamsRead(SYSPARMS* sp)
+int32_t SysParamsRead(SYSCFG* sp)
 {
     InitSysDefaults(sp);
 
-    EEPROMRead((uint32_t *)sp, 0, sizeof(SYSPARMS));
+    EEPROMRead((uint32_t *)sp, 0, sizeof(SYSCFG));
 
     if (sp->magic != MAGIC)
     {
@@ -172,7 +172,7 @@ int32_t SysParamsRead(SYSPARMS* sp)
         return -1;
     }
 
-    System_printf("System Parameters Loaded (size=%d)\n", sizeof(SYSPARMS));
+    System_printf("System Parameters Loaded (size=%d)\n", sizeof(SYSCFG));
     System_flush();
 
     return 0;

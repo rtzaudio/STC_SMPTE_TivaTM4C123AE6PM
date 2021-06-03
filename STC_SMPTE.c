@@ -84,11 +84,11 @@
 /* Constants and Macros */
 
 /* Returns the state of a bit number in the frame buffer */
-#define FRAME_BITSTATE(framebuf, bitnum)    (((framebuf[bitnum/8]) >> (bitnum % 8)) & 0x01)
+#define FRAME_BITSTATE(framebuf, bitnum)    ( ((framebuf[bitnum/8]) >> (bitnum % 8)) & 0x01 )
 
 /* Global Data Items */
 
-SYSPARMS g_sys;
+SYSCFG g_cfg;
 
 /* Static Data Items */
 
@@ -98,6 +98,8 @@ uint32_t g_systemClock;
 
 SMPTETimecode g_smpte_time;
 LTCFrame g_smpte_frame;
+
+int g_frame_rate = 30;
 
 bool b_running = false;
 
@@ -156,11 +158,11 @@ Void SlaveTask(UArg a0, UArg a1)
     SPI_Handle hSlave;
 
     /* Initialize the default servo and program data values */
-    memset(&g_sys, 0, sizeof(SYSPARMS));
+    memset(&g_cfg, 0, sizeof(SYSCFG));
 
     /* Read system parameters from EEPROM */
-    //SysParamsRead(&g_sys);
-    InitSysDefaults(&g_sys);
+    //SysParamsRead(&g_cfg);
+    InitSysDefaults(&g_cfg);
 
     /* Open SLAVE SPI port from STC motherboard
      * 1 Mhz, Moto fmt, polarity 1, phase 0
@@ -243,6 +245,8 @@ Void SlaveTask(UArg a0, UArg a1)
 
 void SMPTE_Start(void)
 {
+    uint32_t clockrate;
+
     g_smpte_time.hours  = 0;
     g_smpte_time.mins   = 0;
     g_smpte_time.secs   = 0;
@@ -266,34 +270,64 @@ void SMPTE_Start(void)
     /* Set default time zone */
     strcpy(g_smpte_time.timezone, timezone);
 
-    /* Enable the signal out relay to connect the SMPTE
-     * output signal to channel 24 on the tape machine.
-     */
-    GPIO_write(Board_RELAY, Board_RELAY_ON);
-    Task_sleep(100);
-    /* Turn the LED on to indicate active */
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-    /* SMPTE output pin low initially */
-    GPIO_write(Board_SMPTE_OUT, PIN_LOW);
-
     // x2 bit clocks:
     // 24fps  = 3840Hz
     // 25fps = 4000Hz
     // 30fps = 4800Hz
 
+    switch(g_frame_rate)
+    {
+    case 24:
+        /* 24 fps */
+        clockrate = 3840;
+        break;
+
+    case 25:
+        /* 25 fps */
+        clockrate = 4000;
+        break;
+
+    case 30:
+        /* 30 fps */
+        clockrate = 4800;
+        break;
+
+    default:
+        /* default to 30 fps */
+        g_frame_rate = 30;
+        clockrate = 4800;
+        break;
+    }
+
     g_halfBit = 0;
     g_bitCount = 0;
 
-    /* Pre-load the state of the first frame bit */
-    g_bitState = FRAME_BITSTATE(((uint8_t*)&g_smpte_frame), g_bitCount);
     b_running = true;
 
+    /* Pre-load the state of the first bit in the frame */
+    g_bitState = FRAME_BITSTATE(((uint8_t*)&g_smpte_frame), g_bitCount);
+
+    /* Enable the signal out relay to connect the SMPTE
+     * output signal to channel 24 on the tape machine.
+     */
+    GPIO_write(Board_RELAY, Board_RELAY_ON);
+    Task_sleep(100);
+
+    /* Turn the LED on to indicate active */
+    GPIO_write(Board_STAT_LED, Board_LED_ON);
+
+    /* SMPTE output pin low initially */
+    GPIO_write(Board_SMPTE_OUT, PIN_LOW);
+
     /* Set the TIMER1B load value to 1ms */
-    TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock/4800);
+    TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock/clockrate);
+
     /* Configure the TIMER1B interrupt for timer timeout */
     TimerIntEnable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
+
     /* Enable the TIMER1B interrupt on the processor (NVIC) */
     IntEnable(INT_WTIMER1A);
+
     /* Enable TIMER1A */
     TimerEnable(WTIMER1_BASE, TIMER_A);
 }
@@ -306,15 +340,20 @@ void SMPTE_Stop(void)
 {
     /* Disable TIMER1A */
     TimerDisable(WTIMER1_BASE, TIMER_A);
+
     /* Disable the TIMER1A interrupt */
     IntDisable(INT_WTIMER1A);
+
     /* Turn off TIMER1B interrupt */
     TimerIntDisable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
+
     /* Clear any pending interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
     Task_sleep(100);
+
     /* SMPTE output pin low */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
+
     /* Relay and LED off */
     GPIO_write(Board_RELAY, Board_RELAY_OFF);
     GPIO_write(Board_STAT_LED, Board_LED_OFF);
@@ -349,10 +388,11 @@ Void Timer1AIntHandler(UArg arg)
         }
 
         /* Check if a full 80-bit frame has been transmitted */
-        if (g_bitCount >= 80)
+        if (g_bitCount >= LTC_FRAME_BIT_COUNT)
         {
             /* If so, then increment the frame time */
-            ltc_frame_increment(&g_smpte_frame, 30, LTC_TV_625_50, 0);
+            ltc_frame_increment(&g_smpte_frame, g_frame_rate, LTC_TV_625_50, 0);
+
             /* Reset frame bit counter */
             g_bitCount = 0;
         }
