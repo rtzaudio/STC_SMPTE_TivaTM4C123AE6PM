@@ -100,8 +100,9 @@ LTCFrame g_smpte_frame;
 LTCFrame g_smpte_ones;
 LTCFrame g_smpte_zeros;
 
-volatile int8_t g_state = 0;
-volatile uint32_t g_bitnum = 0;
+volatile uint8_t  g_bitState = 0;
+volatile uint32_t g_bitCount = 0;
+volatile uint8_t  g_halfBit = 0;
 
 const char timezone[6] = "+0100";
 
@@ -272,7 +273,11 @@ void SMPTE_Start(void)
     // 25fps = 4000Hz
     // 30fps = 4800Hz
 
-    g_state = g_bitnum = 0;
+    g_bitCount = g_halfBit = 0;
+
+    uint8_t* frame = (uint8_t*)&g_smpte_frame;
+
+    g_bitState = ((frame[g_bitCount/8]) >> (g_bitCount % 8)) & 0x01;
 
     // Set the TIMER1B load value to 1ms.
     TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock/4800);
@@ -306,6 +311,7 @@ void SMPTE_Stop(void)
 // WTIMER INTERRUPT HANDLERS
 //*****************************************************************************
 
+#if 0
 Void Timer1AIntHandler(UArg arg)
 {
     uint8_t* pframe = (uint8_t*)&g_smpte_frame;
@@ -317,8 +323,8 @@ Void Timer1AIntHandler(UArg arg)
 
     /* Bi-phase state machine */
 
-    i = g_bitnum / 8;     /* byte index into frame */
-    s = g_bitnum % 8;     /* shift to current bit  */
+    i = g_bitCount / 8;     /* byte index into frame */
+    s = g_bitCount % 8;     /* shift to current bit  */
 
     mask = pframe[i];
 
@@ -352,15 +358,77 @@ Void Timer1AIntHandler(UArg arg)
     case 3:
         /* delay again for duty cycle reset state to start next bit */
         g_state = 0;
-        if (++g_bitnum >= LTC_FRAME_BIT_COUNT)
+        if (++g_bitCount >= LTC_FRAME_BIT_COUNT)
         {
-            g_bitnum = 0;
+            g_bitCount = 0;
             ltc_frame_increment(&g_smpte_frame, 30, LTC_TV_625_50, 0);
         }
         break;
     }
 }
 
+#else
+
+Void Timer1AIntHandler(UArg arg)
+{
+    // Clear the timer interrupt flag.
+    TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
+
+    uint8_t* frame = (uint8_t*)&g_smpte_frame;
+
+    g_bitState = ((frame[g_bitCount/8]) >> (g_bitCount % 8)) & 0x01;
+
+    g_halfBit = !g_halfBit;                 // Flip the halfbit state
+
+    if (g_halfBit)
+    {                                       // First half bit (always flip at start of new bit)
+        GPIO_toggle(Board_SMPTE_OUT);
+    }
+    else
+    {                                       // Half bit is false (second half of bit)
+        if (g_bitState)
+        {                                   // 1 bit so change half way
+            GPIO_toggle(Board_SMPTE_OUT);
+        }
+
+        if (g_bitCount >= 80)
+        {
+#if 0
+            // Last bit sent?
+            if (continuous)
+            {
+                tcTime = micros() - tcStartTime;
+
+                tcStartTime = micros();
+
+                if (tcTime > 40000)
+                {                           // If greater than 40ms
+                    tcSpeed--;              // Reduce timer1 compare threshold
+                }
+                else
+                {
+                    tcSpeed++;              // Increment timer1 compare threshold
+                }
+                OCR1A = tcSpeed;            // And store it
+            }
+            else
+            {
+                tcStopping = true;          // Signal we are stopping
+            }
+#endif
+            ltc_frame_increment(&g_smpte_frame, 30, LTC_TV_625_50, 0);
+
+            g_bitCount = 0;
+        }
+
+        uint8_t* frame = (uint8_t*)&g_smpte_frame;
+
+        g_bitState = ((frame[g_bitCount/8]) >> (g_bitCount % 8)) & 0x01;
+
+        ++g_bitCount;
+    }
+}
+#endif
 
 Void Timer1BIntHandler(UArg arg)
 {
