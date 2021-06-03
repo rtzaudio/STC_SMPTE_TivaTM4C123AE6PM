@@ -80,9 +80,11 @@
 #include "STC_SMPTE.h"
 #include "Utils.h"
 #include "libltc\ltc.h"
-#include "libltc\encoder.h"
 
-/* Constants */
+/* Constants and Macros */
+
+/* Returns the state of a bit number in the frame buffer */
+#define FRAME_BITSTATE(framebuf, bitnum)    (((framebuf[bitnum/8]) >> (bitnum % 8)) & 0x01)
 
 /* Global Data Items */
 
@@ -94,11 +96,10 @@ uint32_t g_systemClock;
 
 /* SMPTE Data Items */
 
-bool running = false;
 SMPTETimecode g_smpte_time;
 LTCFrame g_smpte_frame;
-LTCFrame g_smpte_ones;
-LTCFrame g_smpte_zeros;
+
+bool b_running = false;
 
 volatile uint8_t  g_bitState = 0;
 volatile uint32_t g_bitCount = 0;
@@ -193,10 +194,10 @@ Void SlaveTask(UArg a0, UArg a1)
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
 
-    // Configure TIMER1B as a 16-bit periodic timer.
+    /* Configure TIMER1B as a 16-bit periodic timer */
     TimerConfigure(WTIMER1_BASE, TIMER_CFG_PERIODIC);
 
-    //SMPTE_Start();
+    /* Enter the main SPI slave processing loop */
 
     for(;;)
     {
@@ -236,36 +237,43 @@ Void SlaveTask(UArg a0, UArg a1)
     }
 }
 
+//*****************************************************************************
+// Start the SMPTE Generator
+//*****************************************************************************
 
 void SMPTE_Start(void)
 {
-    g_smpte_time.hours  = 23;
-    g_smpte_time.mins   = 59;
-    g_smpte_time.secs   = 59;
+    g_smpte_time.hours  = 0;
+    g_smpte_time.mins   = 0;
+    g_smpte_time.secs   = 0;
     g_smpte_time.frame  = 0;
+
+    //g_smpte_time.hours  = 23;
+    //g_smpte_time.mins   = 59;
+    //g_smpte_time.secs   = 59;
+    //g_smpte_time.frame  = 0;
+
     //g_smpte_time.years  = 8;
     //g_smpte_time.months = 12;
     //g_smpte_time.days   = 31;
 
-    memset(&g_smpte_ones, 0xFF, sizeof(LTCFrame));
-    memset(&g_smpte_zeros, 0x00, sizeof(LTCFrame));
-
-    strcpy(g_smpte_time.timezone, timezone);
-
+    /* Initialize the smpte frame buffer */
     ltc_frame_reset(&g_smpte_frame);
 
+    /* Set the starting time members in the smpte frame */
     ltc_time_to_frame(&g_smpte_frame, &g_smpte_time, LTC_TV_525_60, 0);
 
-    //memcpy(&g_smpte_frame, &g_smpte_ones, sizeof(LTCFrame));
+    /* Set default time zone */
+    strcpy(g_smpte_time.timezone, timezone);
 
     /* Enable the signal out relay to connect the SMPTE
      * output signal to channel 24 on the tape machine.
      */
     GPIO_write(Board_RELAY, Board_RELAY_ON);
     Task_sleep(100);
-    // Turn the LED on to indicate active
+    /* Turn the LED on to indicate active */
     GPIO_write(Board_STAT_LED, Board_LED_ON);
-    // SMPTE output pin low initially
+    /* SMPTE output pin low initially */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
 
     // x2 bit clocks:
@@ -273,166 +281,97 @@ void SMPTE_Start(void)
     // 25fps = 4000Hz
     // 30fps = 4800Hz
 
-    g_bitCount = g_halfBit = 0;
+    g_halfBit = 0;
+    g_bitCount = 0;
 
-    uint8_t* frame = (uint8_t*)&g_smpte_frame;
+    /* Pre-load the state of the first frame bit */
+    g_bitState = FRAME_BITSTATE(((uint8_t*)&g_smpte_frame), g_bitCount);
+    b_running = true;
 
-    g_bitState = ((frame[g_bitCount/8]) >> (g_bitCount % 8)) & 0x01;
-
-    // Set the TIMER1B load value to 1ms.
+    /* Set the TIMER1B load value to 1ms */
     TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock/4800);
-    // Configure the TIMER1B interrupt for timer timeout.
+    /* Configure the TIMER1B interrupt for timer timeout */
     TimerIntEnable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-    // Enable the TIMER1B interrupt on the processor (NVIC).
+    /* Enable the TIMER1B interrupt on the processor (NVIC) */
     IntEnable(INT_WTIMER1A);
-    // Enable TIMER1A.
+    /* Enable TIMER1A */
     TimerEnable(WTIMER1_BASE, TIMER_A);
 }
 
+//*****************************************************************************
+// Stop the SMPTE Generator
+//*****************************************************************************
+
 void SMPTE_Stop(void)
 {
-    // Disable TIMER1A.
+    /* Disable TIMER1A */
     TimerDisable(WTIMER1_BASE, TIMER_A);
-    // Disable the TIMER1A interrupt.
+    /* Disable the TIMER1A interrupt */
     IntDisable(INT_WTIMER1A);
-    // Turn off TIMER1B interrupt.
+    /* Turn off TIMER1B interrupt */
     TimerIntDisable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-    // Clear any pending interrupt flag.
+    /* Clear any pending interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
     Task_sleep(100);
-    // SMPTE output pin low
+    /* SMPTE output pin low */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
-    // Relay and LED off
+    /* Relay and LED off */
     GPIO_write(Board_RELAY, Board_RELAY_OFF);
     GPIO_write(Board_STAT_LED, Board_LED_OFF);
+
+    b_running = false;
 }
 
 //*****************************************************************************
-// WTIMER INTERRUPT HANDLERS
+// SMPTE Generator WTIMER Interrupt Handler
 //*****************************************************************************
 
-#if 0
 Void Timer1AIntHandler(UArg arg)
 {
-    uint8_t* pframe = (uint8_t*)&g_smpte_frame;
-    uint8_t bit, mask;
-    uint32_t i, s;
-
-    // Clear the timer interrupt flag.
+    /* Clear the timer interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
 
-    /* Bi-phase state machine */
+    /* Flip half bit state indicator */
+    g_halfBit = !g_halfBit;
 
-    i = g_bitCount / 8;     /* byte index into frame */
-    s = g_bitCount % 8;     /* shift to current bit  */
-
-    mask = pframe[i];
-
-    bit = ((mask >> s) & 0x01) ? 1 : 0;
-
-    switch(g_state)
-    {
-    case 0:
-        /* flip bit high initially */
-        GPIO_toggle(Board_SMPTE_OUT);
-        ++g_state;
-        break;
-
-    case 1:
-        /* comment this out to get 1.2khz 50/50 duty cycle wave form */
-        /* Toggle on the cell boundary and again at the half cell time
-         * if the bit is a 1, otherwise not.
-         */
-        if (bit)
-            GPIO_toggle(Board_SMPTE_OUT);
-        /* Otherwise, don't flip for duty cycle period */
-        ++g_state;
-        break;
-
-    case 2:
-        /* toggle again to complete falling edge */
-        GPIO_toggle(Board_SMPTE_OUT);
-        ++g_state;
-        break;
-
-    case 3:
-        /* delay again for duty cycle reset state to start next bit */
-        g_state = 0;
-        if (++g_bitCount >= LTC_FRAME_BIT_COUNT)
-        {
-            g_bitCount = 0;
-            ltc_frame_increment(&g_smpte_frame, 30, LTC_TV_625_50, 0);
-        }
-        break;
-    }
-}
-
-#else
-
-Void Timer1AIntHandler(UArg arg)
-{
-    // Clear the timer interrupt flag.
-    TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
-    uint8_t* frame = (uint8_t*)&g_smpte_frame;
-
-    g_bitState = ((frame[g_bitCount/8]) >> (g_bitCount % 8)) & 0x01;
-
-    g_halfBit = !g_halfBit;                 // Flip the halfbit state
-
+    /* First half bit true, the flip at start of new bit */
     if (g_halfBit)
-    {                                       // First half bit (always flip at start of new bit)
+    {
         GPIO_toggle(Board_SMPTE_OUT);
     }
     else
-    {                                       // Half bit is false (second half of bit)
+    {
+        /* Half bit false indicates second half of bit */
         if (g_bitState)
-        {                                   // 1 bit so change half way
+        {
+            /* A high 1-bit changes half way */
             GPIO_toggle(Board_SMPTE_OUT);
         }
 
+        /* Check if a full 80-bit frame has been transmitted */
         if (g_bitCount >= 80)
         {
-#if 0
-            // Last bit sent?
-            if (continuous)
-            {
-                tcTime = micros() - tcStartTime;
-
-                tcStartTime = micros();
-
-                if (tcTime > 40000)
-                {                           // If greater than 40ms
-                    tcSpeed--;              // Reduce timer1 compare threshold
-                }
-                else
-                {
-                    tcSpeed++;              // Increment timer1 compare threshold
-                }
-                OCR1A = tcSpeed;            // And store it
-            }
-            else
-            {
-                tcStopping = true;          // Signal we are stopping
-            }
-#endif
+            /* If so, then increment the frame time */
             ltc_frame_increment(&g_smpte_frame, 30, LTC_TV_625_50, 0);
-
+            /* Reset frame bit counter */
             g_bitCount = 0;
         }
 
-        uint8_t* frame = (uint8_t*)&g_smpte_frame;
+        /* Pre-load the state of the next bit to go out */
+        g_bitState = FRAME_BITSTATE(((uint8_t*)&g_smpte_frame), g_bitCount);
 
-        g_bitState = ((frame[g_bitCount/8]) >> (g_bitCount % 8)) & 0x01;
-
+        /* Increment the frame bit counter */
         ++g_bitCount;
+
+        /* Toggle the status LED on high bits */
+        if (g_bitState)
+            GPIO_toggle(Board_STAT_LED);
     }
 }
-#endif
 
 Void Timer1BIntHandler(UArg arg)
 {
-    // Clear the timer interrupt flag.
+    /* Clear the timer interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMB_TIMEOUT);
 }
 
