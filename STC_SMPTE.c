@@ -84,7 +84,7 @@
 /* Constants and Macros */
 
 /* Returns the state of a bit number in the frame buffer */
-#define FRAME_BITSTATE(framebuf, bitnum)    ( ((framebuf[bitnum/8]) >> (bitnum % 8)) & 0x01 )
+#define FRAME_BITSTATE(framebuf, bitnum)    ( (((framebuf[bitnum / 8]) >> (bitnum % 8)) & 0x01) )
 
 /* Global Data Items */
 SYSCFG g_cfg;
@@ -100,8 +100,9 @@ bool g_running = false;
 
 volatile int g_frame_rate = 30;
 volatile uint8_t  g_bitState = 0;
-volatile uint32_t g_bitCount = 0;
 volatile uint8_t  g_halfBit = 0;
+volatile uint32_t g_bitCount = 0;
+volatile uint32_t g_frameCount = 0;
 
 const char timezone[6] = "+0100";
 
@@ -225,6 +226,24 @@ Void SlaveTask(UArg a0, UArg a1)
             //System_printf("SPI slave rx %04x\n", ulCommand);
             //System_flush();
 
+            uint8_t cmd  = (ulCommand >> 8) & 0x0F;
+            uint8_t data = (ulCommand & 0xFF);
+
+            switch(cmd)
+            {
+            case SMPTE_REG_MODE:
+                break;
+
+            case SMPTE_REG_CONF:
+                break;
+
+            case SMPTE_REG_STAT:
+                break;
+
+            case SMPTE_REG_DATA:
+                break;
+            }
+
             switch(ulCommand)
             {
             case 0xFE21:
@@ -234,6 +253,10 @@ Void SlaveTask(UArg a0, UArg a1)
             case 0xFE20:
                 SMPTE_Stop();
                 break;
+
+            case SMPTE_REG_MODE:
+                break;
+
             }
         }
     }
@@ -291,6 +314,7 @@ int SMPTE_Start(void)
 
     g_halfBit = 0;
     g_bitCount = 0;
+    g_frameCount = 0;
     g_running = true;
 
     /* Pre-load the state of the first bit in the frame */
@@ -388,6 +412,9 @@ Void Timer1AIntHandler(UArg arg)
         {
             /* If so, then increment the frame time */
             ltc_frame_increment(&g_smpte_frame, g_frame_rate, LTC_TV_625_50, 0);
+
+            /* Increment frame counter */
+            ++g_frameCount;
 
             /* Reset frame bit counter */
             g_bitCount = 0;
