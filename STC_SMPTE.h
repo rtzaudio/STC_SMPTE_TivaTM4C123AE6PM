@@ -130,9 +130,5 @@ typedef struct _SYSCFG
 
 /*** Macros & Function Prototypes ******************************************/
 
-/* main.c */
-void InitSysDefaults(SYSCFG* p);
-int32_t SysParamsWrite(SYSCFG* sp);
-int32_t SysParamsRead(SYSCFG* sp);
 
 /* End-Of-File */

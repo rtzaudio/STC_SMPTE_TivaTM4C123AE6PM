@@ -2,7 +2,7 @@
  *
  * DTC-1200 Digital Transport Controller for Ampex MM-1200 Tape Machines
  *
- * Copyright (C) 2016, RTZ Professional Audio, LLC
+ * Copyright (C) 2021, RTZ Professional Audio, LLC
  * All Rights Reserved
  *
  * RTZ is registered trademark of RTZ Professional Audio, LLC
@@ -87,22 +87,18 @@
 #define FRAME_BITSTATE(framebuf, bitnum)    ( ((framebuf[bitnum/8]) >> (bitnum % 8)) & 0x01 )
 
 /* Global Data Items */
-
 SYSCFG g_cfg;
 
 /* Static Data Items */
-
 uint32_t g_systemClock;
 
 /* SMPTE Data Items */
-
 SMPTETimecode g_smpte_time;
 LTCFrame g_smpte_frame;
 
-int g_frame_rate = 30;
+bool g_running = false;
 
-bool b_running = false;
-
+volatile int g_frame_rate = 30;
 volatile uint8_t  g_bitState = 0;
 volatile uint32_t g_bitCount = 0;
 volatile uint8_t  g_halfBit = 0;
@@ -112,8 +108,8 @@ const char timezone[6] = "+0100";
 /* Static Function Prototypes */
 
 Int main();
-void SMPTE_Start();
-void SMPTE_Stop(void);
+int SMPTE_Start();
+int SMPTE_Stop(void);
 Void SlaveTask(UArg a0, UArg a1);
 Void Timer1AIntHandler(UArg arg);
 Void Timer1BIntHandler(UArg arg);
@@ -136,7 +132,9 @@ Int main()
     /* Now start the main application button polling task */
 
     Error_init(&eb);
+
     Task_Params_init(&taskParams);
+
     taskParams.stackSize = 1500;
     taskParams.priority  = 10;
 
@@ -145,7 +143,7 @@ Int main()
 
     BIOS_start();    /* does not return */
 
-    return(0);
+    return 0;
 }
 
 //*****************************************************************************
@@ -167,8 +165,8 @@ Void SlaveTask(UArg a0, UArg a1)
     /* Open SLAVE SPI port from STC motherboard
      * 1 Mhz, Moto fmt, polarity 1, phase 0
      */
-
     SPI_Params_init(&spiParams);
+
     spiParams.transferMode  = SPI_MODE_BLOCKING;
     spiParams.mode          = SPI_SLAVE;
     spiParams.frameFormat   = SPI_POL1_PHA0;
@@ -199,7 +197,9 @@ Void SlaveTask(UArg a0, UArg a1)
     /* Configure TIMER1B as a 16-bit periodic timer */
     TimerConfigure(WTIMER1_BASE, TIMER_CFG_PERIODIC);
 
-    /* Enter the main SPI slave processing loop */
+    /*
+     * Enter the main SPI slave processing loop
+     */
 
     for(;;)
     {
@@ -243,23 +243,12 @@ Void SlaveTask(UArg a0, UArg a1)
 // Start the SMPTE Generator
 //*****************************************************************************
 
-void SMPTE_Start(void)
+int SMPTE_Start(void)
 {
     uint32_t clockrate;
 
-    g_smpte_time.hours  = 0;
-    g_smpte_time.mins   = 0;
-    g_smpte_time.secs   = 0;
-    g_smpte_time.frame  = 0;
-
-    //g_smpte_time.hours  = 23;
-    //g_smpte_time.mins   = 59;
-    //g_smpte_time.secs   = 59;
-    //g_smpte_time.frame  = 0;
-
-    //g_smpte_time.years  = 8;
-    //g_smpte_time.months = 12;
-    //g_smpte_time.days   = 31;
+    if (g_running)
+        return -1;
 
     /* Initialize the smpte frame buffer */
     ltc_frame_reset(&g_smpte_frame);
@@ -270,10 +259,11 @@ void SMPTE_Start(void)
     /* Set default time zone */
     strcpy(g_smpte_time.timezone, timezone);
 
-    // x2 bit clocks:
-    // 24fps  = 3840Hz
-    // 25fps = 4000Hz
-    // 30fps = 4800Hz
+    /* Setup timer interrupt 2x bit clocks:
+     * 24 fps = 3840Hz
+     * 25 fps = 4000Hz
+     * 30 fps = 4800Hz
+     */
 
     switch(g_frame_rate)
     {
@@ -301,8 +291,7 @@ void SMPTE_Start(void)
 
     g_halfBit = 0;
     g_bitCount = 0;
-
-    b_running = true;
+    g_running = true;
 
     /* Pre-load the state of the first bit in the frame */
     g_bitState = FRAME_BITSTATE(((uint8_t*)&g_smpte_frame), g_bitCount);
@@ -330,14 +319,19 @@ void SMPTE_Start(void)
 
     /* Enable TIMER1A */
     TimerEnable(WTIMER1_BASE, TIMER_A);
+
+    return 0;
 }
 
 //*****************************************************************************
 // Stop the SMPTE Generator
 //*****************************************************************************
 
-void SMPTE_Stop(void)
+int SMPTE_Stop(void)
 {
+    if (!g_running)
+        return 0;
+
     /* Disable TIMER1A */
     TimerDisable(WTIMER1_BASE, TIMER_A);
 
@@ -358,7 +352,9 @@ void SMPTE_Stop(void)
     GPIO_write(Board_RELAY, Board_RELAY_OFF);
     GPIO_write(Board_STAT_LED, Board_LED_OFF);
 
-    b_running = false;
+    g_running = false;
+
+    return 1;
 }
 
 //*****************************************************************************
