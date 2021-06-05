@@ -66,6 +66,28 @@
 /* Tivaware Driver files */
 #include <driverlib/eeprom.h>
 #include <driverlib/fpu.h>
+#include <driverlib/rom.h>
+#include <driverlib/rom_map.h>
+#include <driverlib/adc.h>
+#include <driverlib/can.h>
+#include <driverlib/debug.h>
+#include <driverlib/gpio.h>
+#include <driverlib/ssi.h>
+#include <driverlib/i2c.h>
+#include <driverlib/qei.h>
+#include <driverlib/interrupt.h>
+#include <driverlib/pwm.h>
+#include <driverlib/sysctl.h>
+#include <driverlib/systick.h>
+#include <driverlib/timer.h>
+#include <driverlib/uart.h>
+
+#include <inc/hw_ints.h>
+#include <inc/hw_memmap.h>
+#include <inc/hw_sysctl.h>
+#include <inc/hw_types.h>
+#include <inc/hw_ssi.h>
+#include <inc/hw_i2c.h>
 
 /* Generic Includes */
 #include <file.h>
@@ -78,6 +100,7 @@
 /* XDCtools Header files */
 #include "Board.h"
 #include "STC_SMPTE.h"
+#include "STC_SMPTE_SPI.h"
 #include "Utils.h"
 #include "libltc\ltc.h"
 
@@ -96,7 +119,8 @@ uint32_t g_systemClock;
 SMPTETimecode g_smpte_time;
 LTCFrame g_smpte_frame;
 
-bool g_running = false;
+static bool g_running = false;
+static bool g_drop_frame = false;
 
 volatile int g_frame_rate = 30;
 volatile uint8_t  g_bitState = 0;
@@ -109,8 +133,9 @@ const char timezone[6] = "+0100";
 /* Static Function Prototypes */
 
 Int main();
-int SMPTE_Start();
-int SMPTE_Stop(void);
+void SMPTE_Generator_Reset(void);
+int SMPTE_Generator_Start();
+int SMPTE_Generator_Stop(void);
 Void SlaveTask(UArg a0, UArg a1);
 Void Timer1AIntHandler(UArg arg);
 Void Timer1BIntHandler(UArg arg);
@@ -198,6 +223,9 @@ Void SlaveTask(UArg a0, UArg a1)
     /* Configure TIMER1B as a 16-bit periodic timer */
     TimerConfigure(WTIMER1_BASE, TIMER_CFG_PERIODIC);
 
+    /* Reset the SMPTE frame buffer to zeros */
+    SMPTE_Generator_Reset();
+
     /*
      * Enter the main SPI slave processing loop
      */
@@ -205,12 +233,13 @@ Void SlaveTask(UArg a0, UArg a1)
     for(;;)
     {
         bool success;
-        uint16_t ulCommand;
+        uint16_t ulRequest;
         uint16_t ulReply = 0;
+        uint16_t ulDummy;
         SPI_Transaction transaction;
 
         transaction.count = 1;
-        transaction.rxBuf = (Ptr)&ulCommand;
+        transaction.rxBuf = (Ptr)&ulRequest;
         transaction.txBuf = (Ptr)&ulReply;
 
         /* Send the SPI transaction */
@@ -220,67 +249,160 @@ Void SlaveTask(UArg a0, UArg a1)
         {
             System_printf("SPI slave rx failed\n");
             System_flush();
+            /* Loop if error reading SPI! */
+            continue;
         }
-        else
+
+        uint8_t opcode = (ulRequest & SMPTE_REG_MASK) >> 8;
+
+        if (opcode == SMPTE_REG_GENCTL)
         {
-            //System_printf("SPI slave rx %04x\n", ulCommand);
-            //System_flush();
+            /* ====================================================
+             * SMPTE GENERATOR CONTROL REGISTER
+             * ====================================================
+             */
 
-            uint8_t cmd  = (ulCommand >> 8) & 0x0F;
-            uint8_t data = (ulCommand & 0xFF);
-
-            switch(cmd)
+            if (ulRequest & SMPTE_F_READ)
             {
-            case SMPTE_REG_MODE:
-                break;
+                /* READ SMPTE GENERATOR CONTROL REGISTER */
 
-            case SMPTE_REG_CONF:
-                break;
+                switch(g_frame_rate)
+                {
+                case 24:
+                    ulReply = SMPTE_GENCTL_FPS24;
+                    break;
 
-            case SMPTE_REG_STAT:
-                break;
+                case 25:
+                    ulReply = SMPTE_GENCTL_FPS25;
+                    break;
 
-            case SMPTE_REG_DATA:
-                break;
+                case 30:
+                    ulReply = (g_drop_frame) ? SMPTE_GENCTL_FPS30D : SMPTE_GENCTL_FPS30;
+                    break;
+
+                default:
+                    ulReply = 0;
+                    break;
+                }
+
+                if (g_running)
+                    ulReply |= SMPTE_GENCTL_ENABLE;
+
+                /* Send the reply word back */
+                transaction.count = 1;
+                transaction.txBuf = (Ptr)&ulReply;
+                transaction.rxBuf = (Ptr)&ulDummy;
+
+                /* Send the SPI transaction */
+                success = SPI_transfer(hSlave, &transaction);
+
+                if (!success)
+                {
+                    System_printf("SPI slave rx failed\n");
+                    System_flush();
+                }
             }
-
-            switch(ulCommand)
+            else
             {
-            case 0xFE21:
-                SMPTE_Start();
-                break;
+                /* WRITE SMPTE GENERATOR CONTROL REGISTER */
 
-            case 0xFE20:
-                SMPTE_Stop();
-                break;
+                /* Stop the generator if it's already running */
+                SMPTE_Generator_Stop();
 
-            case SMPTE_REG_MODE:
-                break;
+                /* Determine the frame rate requested */
+                switch(SMPTE_GENCTL_FPS(ulRequest))
+                {
+                case SMPTE_GENCTL_FPS24:
+                    g_frame_rate = 24;
+                    g_drop_frame = false;
+                    break;
 
+                case SMPTE_GENCTL_FPS25:
+                    g_frame_rate = 25;
+                    g_drop_frame = false;
+                    break;
+
+                case SMPTE_GENCTL_FPS30:
+                    g_frame_rate = 30;
+                    g_drop_frame = false;
+                    break;
+
+                case SMPTE_GENCTL_FPS30D:
+                    g_frame_rate = 30;
+                    g_drop_frame = true;
+                    break;
+
+                default:
+                    g_frame_rate = 30;
+                    g_drop_frame = true;
+                    break;
+                }
+
+                /* Don't reset frame counts if user is resuming */
+                if (!(ulRequest & SMPTE_GENCTL_RESUME))
+                    SMPTE_Generator_Reset();
+
+                /* Start the SMPTE generator if enable flag set */
+                if (ulRequest & SMPTE_GENCTL_ENABLE)
+                    SMPTE_Generator_Start();
             }
+        }
+        else if (opcode == SMPTE_REG_STAT)
+        {
+            /* ====================================================
+             * SMPTE STATUS REGISTER
+             * ====================================================
+             */
+
+        }
+        else if (opcode == SMPTE_REG_DATA)
+        {
+            /* ====================================================
+             * SMPTE STATUS REGISTER
+             * ====================================================
+             */
+
         }
     }
+}
+
+//*****************************************************************************
+// Reset SMPTE generator start time
+//*****************************************************************************
+
+void SMPTE_Generator_Reset(void)
+{
+    memset(&g_smpte_time, 0, sizeof(g_smpte_time));
+
+    /* Set default time zone */
+    strcpy(g_smpte_time.timezone, timezone);
+
+    g_smpte_time.years  = 0;        /* LTC date uses 2-digit year 00-99  */
+    g_smpte_time.months = 1;        /* valid months are 1..12            */
+    g_smpte_time.days   = 1;        /* day of month 1..31                */
+
+    g_smpte_time.hours  = 0;        /* hour 0..23                        */
+    g_smpte_time.mins   = 0;        /* minute 0..60                      */
+    g_smpte_time.secs   = 0;        /* second 0..60                      */
+    g_smpte_time.frame  = 0;        /* sub-second frame 0..(FPS - 1)     */
+
+    /* Reset the frame buffer */
+    ltc_frame_reset(&g_smpte_frame);
 }
 
 //*****************************************************************************
 // Start the SMPTE Generator
 //*****************************************************************************
 
-int SMPTE_Start(void)
+int SMPTE_Generator_Start(void)
 {
     uint32_t clockrate;
 
     if (g_running)
         return -1;
 
-    /* Initialize the smpte frame buffer */
-    ltc_frame_reset(&g_smpte_frame);
-
     /* Set the starting time members in the smpte frame */
     ltc_time_to_frame(&g_smpte_frame, &g_smpte_time, LTC_TV_525_60, 0);
-
-    /* Set default time zone */
-    strcpy(g_smpte_time.timezone, timezone);
 
     /* Setup timer interrupt 2x bit clocks:
      * 24 fps = 3840Hz
@@ -324,7 +446,7 @@ int SMPTE_Start(void)
      * output signal to channel 24 on the tape machine.
      */
     GPIO_write(Board_RELAY, Board_RELAY_ON);
-    Task_sleep(100);
+    Task_sleep(50);
 
     /* Turn the LED on to indicate active */
     GPIO_write(Board_STAT_LED, Board_LED_ON);
@@ -351,7 +473,7 @@ int SMPTE_Start(void)
 // Stop the SMPTE Generator
 //*****************************************************************************
 
-int SMPTE_Stop(void)
+int SMPTE_Generator_Stop(void)
 {
     if (!g_running)
         return 0;
@@ -367,7 +489,6 @@ int SMPTE_Stop(void)
 
     /* Clear any pending interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-    Task_sleep(100);
 
     /* SMPTE output pin low */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
@@ -392,6 +513,9 @@ Void Timer1AIntHandler(UArg arg)
 
     /* Flip half bit state indicator */
     g_halfBit = !g_halfBit;
+
+    /* Set drop frame bit if enabled */
+    g_smpte_frame.dfbit = (g_drop_frame) ? 1 : 0;
 
     /* First half bit true, the flip at start of new bit */
     if (g_halfBit)

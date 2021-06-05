@@ -40,41 +40,6 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * ============================================================================ */
 
-/* Standard includes */
-#include <file.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <ctype.h>
-#include <stdbool.h>
-#include <math.h>
-
-/* Standard Stellaris includes */
-#include "inc/hw_ints.h"
-#include "inc/hw_memmap.h"
-#include "inc/hw_sysctl.h"
-#include "inc/hw_types.h"
-#include "inc/hw_ssi.h"
-#include "inc/hw_i2c.h"
-#include "driverlib/rom.h"
-#include "driverlib/rom_map.h"
-#include "driverlib/adc.h"
-#include "driverlib/can.h"
-#include "driverlib/debug.h"
-#include "driverlib/gpio.h"
-#include "driverlib/ssi.h"
-#include "driverlib/i2c.h"
-#include "driverlib/qei.h"
-#include "driverlib/interrupt.h"
-#include "driverlib/pwm.h"
-#include "driverlib/sysctl.h"
-#include "driverlib/systick.h"
-#include "driverlib/timer.h"
-#include "driverlib/uart.h"
-
-/*** Global Constants ******************************************************/
-
 /* VERSION INFO - The min build specifies the minimum build required
  * that does NOT force a default reset of all the config parameters
  * at run time. For instance, if the config loads build 5 and the minimum
@@ -127,48 +92,5 @@ typedef struct _SYSCFG
 	uint32_t debug;
     uint32_t sysflags;
 } SYSCFG;
-
-/*** SPI Slave Registers ***************************************************/
-
-/* All registers are 16-bits with the upper word containing the command
- * and flag bits. The lower 8-bits contains any associated data byte.
- *
- *   +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
- *   | R | F | F | F | C | C | C | C | B | B | B | B | B | B | B | B |
- *   | W | 6 | 5 | 4 | 3 | 2 | 1 | 0 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
- *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *     |   |       |   |           |   |                           |
- *     |   +---+---+   +-----+-----+   +-------------+-------------+
- *     |       |             |                       |
- *    R/W     RSVD          REG                  DATA/FLAGS
- */
-
-/* SMPTE Controller Registers */
-#define SMPTE_REG_MODE      0           /* Mode Register   (RW, 8-bit  */
-#define SMPTE_REG_CONF      1           /* Config Register (RW, 8-bit) */
-#define SMPTE_REG_STAT      2           /* Status Register (RO, 8-bit) */
-#define SMPTE_REG_DATA      3           /* Data Register   (RO, 8-bit) */
-
-#define SMPTE_REG_MASK      0x0F00      /* C0-C3 register op-code      */
-#define SMPTE_F_READ        0x8000      /* Bit-16 1=read 0=write reg   */
-
-/* SMPTE_REG_MODE Register (HI-BYTE) */
-#define SMPTE_MODE_DISABLE  0           /* SMPTE controller disabled   */
-#define SMPTE_MODE_MASTER   1           /* SMPTE master mode           */
-#define SMPTE_MODE_SLAVE    2           /* SMPTE slave mode            */
-
-#define SMPTE_MODE_MASK     0x03
-#define SMPTE_MODE_SEL(x)   (((x) & SMPTE_MODE_MASK) << 8)
-
-/* SMPTE_REG_CONF Register (LO-BYTE) */
-#define SMPTE_FPS_24        0           /* Generator set for 24 FPS    */
-#define SMPTE_FPS_25        1           /* Generator set for 25 FPS    */
-#define SMPTE_FPS_30        2           /* Generator set for 30 FPS    */
-#define SMPTE_FPS_30D       3           /* Set for 30 FPS drop frame   */
-
-#define SMPTE_FPS_MASK      0x03
-#define SMPTE_CONF_FPS(x)   (((x) & SMPTE_FPS_MASK))
-
-/*** Macros & Function Prototypes ******************************************/
 
 /* End-Of-File */
