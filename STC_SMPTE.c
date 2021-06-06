@@ -178,6 +178,12 @@ Int main()
 
 Void SlaveTask(UArg a0, UArg a1)
 {
+    bool success;
+    uint16_t ulRequest;
+    uint16_t ulReply;
+    uint16_t ulDummy;
+    SPI_Transaction transaction1;
+    SPI_Transaction transaction2;
     SPI_Params spiParams;
     SPI_Handle hSlave;
 
@@ -198,7 +204,6 @@ Void SlaveTask(UArg a0, UArg a1)
     spiParams.frameFormat   = SPI_POL1_PHA0;
     spiParams.bitRate       = 250000;
     spiParams.dataSize      = 16;
-    spiParams.transferCallbackFxn = NULL;
 
     hSlave = SPI_open(STC_SMPTE_SPI0, &spiParams);
 
@@ -232,18 +237,14 @@ Void SlaveTask(UArg a0, UArg a1)
 
     for(;;)
     {
-        bool success;
-        uint16_t ulRequest;
-        uint16_t ulReply = 0;
-        uint16_t ulDummy;
-        SPI_Transaction transaction;
+        ulReply = ulRequest = ulDummy = 0;
 
-        transaction.count = 1;
-        transaction.rxBuf = (Ptr)&ulRequest;
-        transaction.txBuf = (Ptr)&ulReply;
+        transaction1.count = 1;
+        transaction1.txBuf = (Ptr)&ulDummy;
+        transaction1.rxBuf = (Ptr)&ulRequest;
 
         /* Send the SPI transaction */
-        success = SPI_transfer(hSlave, &transaction);
+        success = SPI_transfer(hSlave, &transaction1);
 
         if (!success)
         {
@@ -255,10 +256,33 @@ Void SlaveTask(UArg a0, UArg a1)
 
         uint8_t opcode = (ulRequest & SMPTE_REG_MASK) >> 8;
 
-        if (opcode == SMPTE_REG_GENCTL)
+        if (opcode == SMPTE_REG_REVID)
         {
             /* ====================================================
-             * SMPTE GENERATOR CONTROL REGISTER
+             * SMPTE CARD REV/ID REGISTER (RO)
+             * ====================================================
+             */
+
+            ulReply = SMPTE_REVID;
+
+            /* Send the reply word back */
+            transaction2.count = 1;
+            transaction2.txBuf = (Ptr)&ulReply;
+            transaction2.rxBuf = (Ptr)&ulDummy;
+
+            /* Send the SPI transaction */
+            success = SPI_transfer(hSlave, &transaction2);
+
+            if (!success)
+            {
+                System_printf("SMPTE slave reply failed!\n");
+                System_flush();
+            }
+        }
+        else if (opcode == SMPTE_REG_GENCTL)
+        {
+            /* ====================================================
+             * SMPTE GENERATOR CONTROL REGISTER (RW)
              * ====================================================
              */
 
@@ -289,16 +313,16 @@ Void SlaveTask(UArg a0, UArg a1)
                     ulReply |= SMPTE_GENCTL_ENABLE;
 
                 /* Send the reply word back */
-                transaction.count = 1;
-                transaction.txBuf = (Ptr)&ulReply;
-                transaction.rxBuf = (Ptr)&ulDummy;
+                transaction2.count = 1;
+                transaction2.txBuf = (Ptr)&ulReply;
+                transaction2.rxBuf = (Ptr)&ulDummy;
 
                 /* Send the SPI transaction */
-                success = SPI_transfer(hSlave, &transaction);
+                success = SPI_transfer(hSlave, &transaction2);
 
                 if (!success)
                 {
-                    System_printf("SPI slave rx failed\n");
+                    System_printf("SMPTE Slave reply failed!\n");
                     System_flush();
                 }
             }
@@ -338,13 +362,21 @@ Void SlaveTask(UArg a0, UArg a1)
                     break;
                 }
 
-                /* Don't reset frame counts if user is resuming */
-                if (!(ulRequest & SMPTE_GENCTL_RESUME))
-                    SMPTE_Generator_Reset();
-
                 /* Start the SMPTE generator if enable flag set */
                 if (ulRequest & SMPTE_GENCTL_ENABLE)
+                {
+                    /* Don't reset frame counts on resume */
+                    if (!(ulRequest & SMPTE_GENCTL_RESUME))
+                    {
+                        SMPTE_Generator_Reset();
+                    }
+
                     SMPTE_Generator_Start();
+                }
+                else
+                {
+                    SMPTE_Generator_Stop();
+                }
             }
         }
         else if (opcode == SMPTE_REG_STAT)
@@ -372,14 +404,15 @@ Void SlaveTask(UArg a0, UArg a1)
 
 void SMPTE_Generator_Reset(void)
 {
+    /* Zero out the starting time struct */
     memset(&g_smpte_time, 0, sizeof(g_smpte_time));
 
     /* Set default time zone */
     strcpy(g_smpte_time.timezone, timezone);
 
-    g_smpte_time.years  = 0;        /* LTC date uses 2-digit year 00-99  */
-    g_smpte_time.months = 1;        /* valid months are 1..12            */
-    g_smpte_time.days   = 1;        /* day of month 1..31                */
+    //g_smpte_time.years  = 0;        /* LTC date uses 2-digit year 00-99  */
+    //g_smpte_time.months = 1;        /* valid months are 1..12            */
+    //g_smpte_time.days   = 1;        /* day of month 1..31                */
 
     g_smpte_time.hours  = 0;        /* hour 0..23                        */
     g_smpte_time.mins   = 0;        /* minute 0..60                      */
@@ -388,6 +421,9 @@ void SMPTE_Generator_Reset(void)
 
     /* Reset the frame buffer */
     ltc_frame_reset(&g_smpte_frame);
+
+    /* Set the starting time members in the smpte frame */
+    ltc_time_to_frame(&g_smpte_frame, &g_smpte_time, LTC_TV_525_60, 0);
 }
 
 //*****************************************************************************
@@ -400,9 +436,6 @@ int SMPTE_Generator_Start(void)
 
     if (g_running)
         return -1;
-
-    /* Set the starting time members in the smpte frame */
-    ltc_time_to_frame(&g_smpte_frame, &g_smpte_time, LTC_TV_525_60, 0);
 
     /* Setup timer interrupt 2x bit clocks:
      * 24 fps = 3840Hz

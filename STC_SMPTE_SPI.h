@@ -1,6 +1,6 @@
 /* ============================================================================
  *
- * DTC-1200 Digital Transport Controller for Ampex MM-1200 Tape Machines
+ * STC_SMPTE Time Code Controller for Ampex MM-1200 Tape Machines
  *
  * Copyright (C) 2021, RTZ Professional Audio, LLC
  * All Rights Reserved
@@ -30,14 +30,18 @@
 /* Upper bit of indicates R/W */
 #define SMPTE_F_READ            (1 << 15)       /* Bit-16 1=read 0=write reg   */
 
+/* SMPTE Daughter Card ID */
+#define SMPTE_REVID             0xBA10          /* upper nibble always BA      */
+
 /* Register number bits */
 #define SMPTE_REG_MASK          0x0F00          /* C0-C3 register op-code      */
 
 /* SMPTE Controller Registers (C0-C3) */
-#define SMPTE_REG_GENCTL        0               /* Generator Cntrl (RW, 8-bit) */
-#define SMPTE_REG_DECCTL        1               /* Decoder Cntrl   (RW, 8-bit) */
-#define SMPTE_REG_STAT          2               /* Decode Status   (RO, 8-bit) */
-#define SMPTE_REG_DATA          3               /* Data Register   (RO, 8-bit) */
+#define SMPTE_REG_REVID         1               /* Generator Cntrl (RO, 16-bit) */
+#define SMPTE_REG_GENCTL        2               /* Generator Cntrl (RW, 8-bit) */
+#define SMPTE_REG_DECCTL        3               /* Decoder Cntrl   (RW, 8-bit) */
+#define SMPTE_REG_STAT          4               /* Decode Status   (RO, 8-bit) */
+#define SMPTE_REG_DATA          5               /* Data Register   (RO, 8-bit) */
 
 #define SMPTE_REG_SET(x)        (((x) << 8) & SMPTE_REG_MASK)
 #define SMPTE_REG_GET(x)        (((x) & SMPTE_REG_MASK) >> 8)
@@ -51,6 +55,7 @@
 #define SMPTE_GENCTL_FPS(x)     (((x) & 0x03))
 #define SMPTE_GENCTL_RESUME     (1 << 2)        /* do not reset time on start  */
 #define SMPTE_GENCTL_ENABLE     (1 << 7)        /* SMPTE generator enable bit  */
+#define SMPTE_GENCTL_DISABLE    (0)
 
 #endif /*_STC_SMPTE_SPI_H_*/
 
