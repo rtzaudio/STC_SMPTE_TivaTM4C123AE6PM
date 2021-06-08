@@ -58,6 +58,7 @@ extern "C" {
 #define Board_CHANGE                STC_SMPTE_CHANGE
 #define Board_RELAY                 STC_SMPTE_RELAY
 #define Board_WATCHDOG0             STC_SMPTE_WATCHDOG0
+#define Board_BUSY                  STC_SMPTE_BUSY
 
 #define Board_LED_ON                STC_SMPTE_LED_ON
 #define Board_LED_OFF               STC_SMPTE_LED_OFF

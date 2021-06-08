@@ -187,6 +187,9 @@ Void SlaveTask(UArg a0, UArg a1)
     SPI_Params spiParams;
     SPI_Handle hSlave;
 
+    /* Set busy pin high to indicate busy status */
+    GPIO_write(Board_BUSY, PIN_HIGH);
+
     /* Initialize the default servo and program data values */
     memset(&g_cfg, 0, sizeof(SYSCFG));
 
@@ -244,7 +247,10 @@ Void SlaveTask(UArg a0, UArg a1)
         transaction1.rxBuf = (Ptr)&ulRequest;
 
         /* Send the SPI transaction */
+
+        GPIO_write(Board_BUSY, PIN_LOW);
         success = SPI_transfer(hSlave, &transaction1);
+        GPIO_write(Board_BUSY, PIN_HIGH);
 
         if (!success)
         {
@@ -271,7 +277,9 @@ Void SlaveTask(UArg a0, UArg a1)
             transaction2.rxBuf = (Ptr)&ulDummy;
 
             /* Send the SPI transaction */
+            GPIO_write(Board_BUSY, PIN_LOW);
             success = SPI_transfer(hSlave, &transaction2);
+            GPIO_write(Board_BUSY, PIN_HIGH);
 
             if (!success)
             {
@@ -318,7 +326,9 @@ Void SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&ulDummy;
 
                 /* Send the SPI transaction */
+                GPIO_write(Board_BUSY, PIN_LOW);
                 success = SPI_transfer(hSlave, &transaction2);
+                GPIO_write(Board_BUSY, PIN_HIGH);
 
                 if (!success)
                 {
@@ -544,11 +554,11 @@ Void Timer1AIntHandler(UArg arg)
     /* Clear the timer interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
 
-    /* Flip half bit state indicator */
-    g_halfBit = !g_halfBit;
-
     /* Set drop frame bit if enabled */
     g_smpte_frame.dfbit = (g_drop_frame) ? 1 : 0;
+
+    /* Flip half bit state indicator */
+    g_halfBit = !g_halfBit;
 
     /* First half bit true, the flip at start of new bit */
     if (g_halfBit)

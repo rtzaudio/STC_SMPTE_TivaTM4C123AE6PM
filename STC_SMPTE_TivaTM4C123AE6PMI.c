@@ -172,11 +172,11 @@ void STC_SMPTE_initGeneral(void)
 
 GPIO_PinConfig gpioPinConfigs[] = {
     /*=== Input pins ===*/
-    /* (0) STC_SMPTE_BOOTLOAD */
-    GPIOTiva_PA_7 | GPIO_CFG_INPUT | GPIO_CFG_IN_PU,
-    /* (1) STC_SMPTE_IN */
+    /* (0) STC_SMPTE_IN */
     GPIOTiva_PC_4 | GPIO_CFG_INPUT,
     /*=== Output pins ===*/
+    /* (1) STC_SMPTE_BUSY */
+    GPIOTiva_PA_7 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
     /* (2) STC_SMPTE_INT_N */
     GPIOTiva_PA_6 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW,
     /* (3) STC_SMPTE_OUT */
@@ -206,8 +206,8 @@ GPIO_PinConfig gpioPinConfigs[] = {
  *       reduce memory usage (if placed at end of gpioPinConfigs array).
  */
 GPIO_CallbackFxn gpioCallbackFunctions[] = {
-    NULL,  /* STC_SMPTE_MCP23S17T_INT1A (PG4) */
-    NULL   /* STC_SMPTE_MCP23S17T_INT2B (PG3) */
+    NULL,  /* STC_SMPTE_IN (PC4) */
+    NULL
 };
 
 /* The device-specific GPIO_config structure */
@@ -224,11 +224,11 @@ const GPIOTiva_Config GPIOTiva_config = {
  */
 void STC_SMPTE_initGPIO(void)
 {
-    // Enable pin PA7 for GPIOInput
-    GPIOPinTypeGPIOInput(GPIO_PORTA_BASE, GPIO_PIN_7);
     // Enable pin PC4 for GPIOInput
     GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_4);
 
+    // Enable pin PA7 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_7);
     // Enable pin PA6 for GPIOOutput
     GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_6);
     // Enable pin PB6 for GPIOOutput
@@ -245,7 +245,6 @@ void STC_SMPTE_initGPIO(void)
     GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_2);
     // Enable pin PE3 for GPIOOutput
     GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_3);
-
     // Enable pin PF4 for GPIOOutput
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_4);
 
