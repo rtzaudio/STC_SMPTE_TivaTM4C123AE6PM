@@ -173,7 +173,7 @@ void STC_SMPTE_initGeneral(void)
 GPIO_PinConfig gpioPinConfigs[] = {
     /*=== Input pins ===*/
     /* (0) STC_SMPTE_IN */
-    //GPIOTiva_PC_4 | GPIO_CFG_INPUT  | GPIO_CFG_IN_INT_BOTH_EDGES,
+    GPIOTiva_PC_4 | GPIO_CFG_INPUT  | GPIO_CFG_IN_INT_BOTH_EDGES,
     /*=== Output pins ===*/
     /* (1) STC_SMPTE_BUSY */
     GPIOTiva_PA_7 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
@@ -224,7 +224,7 @@ const GPIOTiva_Config GPIOTiva_config = {
 void STC_SMPTE_initGPIO(void)
 {
     // Enable pin PC4 for GPIOInput
-    //GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_4);
+    GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_4);
 
     // Enable pin PA7 for GPIOOutput
     GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_7);

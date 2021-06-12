@@ -89,6 +89,7 @@
 #include <inc/hw_types.h>
 #include <inc/hw_ssi.h>
 #include <inc/hw_i2c.h>
+#include <inc/hw_timer.h>
 
 /* Generic Includes */
 #include <file.h>
@@ -146,6 +147,7 @@ static LTCFrame g_rxFrame;
 static SMPTETimecode g_rxTime;
 
 static uint8_t* code = (uint8_t*)&g_rxFrame;
+static bool g_firsttime = true;
 
 
 
@@ -187,18 +189,18 @@ Int main()
     Hwi_plug(INT_WTIMER1A, Timer1AIntHandler);
     Hwi_plug(INT_WTIMER1B, Timer1BIntHandler);
 
-    Hwi_plug(INT_WTIMER0A, Timer0AIntHandler);
-    Hwi_plug(INT_WTIMER0B, Timer0BIntHandler);
+    //Hwi_plug(INT_WTIMER0A, Timer0AIntHandler);
+    //Hwi_plug(INT_WTIMER0B, Timer0BIntHandler);
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
 
     /* Setup callback Hwi handler the SMPTE pulse stream input */
-    //GPIO_setCallback(Board_SMPTE_IN, gpioStreamInHwi);
+    GPIO_setCallback(Board_SMPTE_IN, gpioStreamInHwi);
 
     /* Enable the SMPTE input stream interrupts */
-    //GPIO_enableInt(Board_SMPTE_IN);
+    GPIO_enableInt(Board_SMPTE_IN);
 
     /* Now start the main application button polling task */
 
@@ -625,6 +627,8 @@ Void Timer1BIntHandler(UArg arg)
 
 int SMPTE_Decoder_Start(void)
 {
+    g_firsttime = true;
+
     /* Zero out the starting time struct */
     memset(&g_rxTime, 0, sizeof(g_rxTime));
 
@@ -632,14 +636,15 @@ int SMPTE_Decoder_Start(void)
     ltc_frame_reset(&g_rxFrame);
 
     /* Enable the SMPTE input stream interrupts */
-    //GPIO_enableInt(Board_SMPTE_IN);
+    GPIO_enableInt(Board_SMPTE_IN);
 
     /* Configure the GPIO to be CCP pins for the timer peripheral */
-    GPIOPinConfigure(GPIO_PC4_WT0CCP0);
+    //GPIOPinConfigure(GPIO_PC4_WT0CCP0);
     //GPIOPinConfigure(GPIO_PC5_T2CCP1);
 
     /* Initialize Timer A to run as periodic up-count edge capture */
-    TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP);
+    //TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP);
+    TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_PERIODIC | TIMER_CFG_A_PERIODIC_UP);
 
     /* To use the timer in Edge Time mode, it must be preloaded with initial
      * values.  If the prescaler is used, then it must be preloaded as well.
@@ -647,22 +652,22 @@ int SMPTE_Decoder_Start(void)
      * the maximum of 0xFFFF for the 16-bit wide split timers, and 0xFF to add
      * the additional 8-bits to the split timer with the prescaler.
      */
-    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFF);
-    TimerPrescaleSet(WTIMER0_BASE, TIMER_A, 0xFF);
+    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0);
+    //TimerPrescaleSet(WTIMER0_BASE, TIMER_A, 0xFF);
 
     // Configure Timer A to trigger on both edges
-    TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_BOTH_EDGES);
+    //TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_BOTH_EDGES);
 
     /* Clear the interrupt status flag.  This is done to make sure the
      * interrupt flag is cleared before we enable it.
      */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    //TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
 
     /* Enable the Timer A and B interrupts for Capture Events */
-    TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    //TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
 
     /* Enable the interrupts for Timer A and Timer B on the processor (NVIC) */
-    IntEnable(INT_TIMER0A);
+    //IntEnable(INT_TIMER0A);
 
     /* Enable both Timer A and Timer B to begin the application */
     TimerEnable(WTIMER0_BASE, TIMER_A);
@@ -673,13 +678,13 @@ int SMPTE_Decoder_Start(void)
 int SMPTE_Decoder_Stop(void)
 {
     /* Enable the SMPTE input stream interrupts */
-    //GPIO_disableInt(Board_SMPTE_IN);
+    GPIO_disableInt(Board_SMPTE_IN);
 
     /* Enable both Timer A and Timer B to begin the application */
     TimerDisable(WTIMER0_BASE, TIMER_A);
 
     /* Enable the interrupts for Timer A on the processor (NVIC) */
-    IntDisable(INT_TIMER0A);
+    //IntDisable(INT_TIMER0A);
 
     return 0;
 }
@@ -694,6 +699,7 @@ static int count = 0;
 static int drop = 0;
 static int fps = 0;
 
+#if 0
 Void Timer0AIntHandler(UArg arg)
 {
     uint32_t i, b, t;
@@ -774,17 +780,27 @@ Void Timer0BIntHandler(UArg arg)
     /* Clear the timer interrupt flag */
     TimerIntClear(WTIMER0_BASE, status);
 }
+#endif
 
 
-#if 0
 void gpioStreamInHwi(unsigned int index)
 {
-    int i;
-    int32_t b, t;
+    uint32_t i;
+    uint32_t b;
+    uint32_t t, d;
     uint32_t bitState;
+    static uint32_t tlast = 0;
 
     /* Clear the interrupt source */
     GPIO_clearInt(Board_SMPTE_IN);
+
+    /* First edge, can't time yet */
+    if (g_firsttime)
+    {
+        tlast = TimerValueGet(WTIMER0_BASE, TIMER_A);
+        g_firsttime = false;
+        return;
+    }
 
     /* GPIO pin interrupt occurred, read bit state */
     bitState = GPIO_read(Board_SMPTE_IN);
@@ -795,8 +811,12 @@ void gpioStreamInHwi(unsigned int index)
         GPIO_write(Board_STAT_LED, PIN_LOW);
 
     /* Determine the pulse width time in uSec */
-    t = _timer.read_us();
-    _timer.reset();
+    d = TimerValueGet(WTIMER0_BASE, TIMER_A);
+    t = d - tlast;
+    tlast = d;
+
+    /* Resets timeout timer */
+    HWREG(WTIMER0_BASE + TIMER_O_TAV) = 0;
 
     if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
     {
@@ -857,6 +877,7 @@ void gpioStreamInHwi(unsigned int index)
 }
 
 
+#if 0
 void LTC_SMPTE::parse_code()
 {
     frame = (code[1] & 0x03) * 10 + (code[0] & 0x0f);
