@@ -192,6 +192,7 @@ Int main()
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
 
     /* Setup callback Hwi handler the SMPTE pulse stream input */
     //GPIO_setCallback(Board_SMPTE_IN, gpioStreamInHwi);
@@ -396,6 +397,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                         SMPTE_Encoder_Reset();
                     }
 
+                    SMPTE_Decoder_Start();
                     SMPTE_Encoder_Start();
                 }
                 else
@@ -632,9 +634,6 @@ int SMPTE_Decoder_Start(void)
     /* Enable the SMPTE input stream interrupts */
     //GPIO_enableInt(Board_SMPTE_IN);
 
-    /* Enable the peripherals used edge capture */
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-
     /* Configure the GPIO to be CCP pins for the timer peripheral */
     GPIOPinConfigure(GPIO_PC4_WT0CCP0);
     //GPIOPinConfigure(GPIO_PC5_T2CCP1);
@@ -663,7 +662,7 @@ int SMPTE_Decoder_Start(void)
     TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
 
     /* Enable the interrupts for Timer A and Timer B on the processor (NVIC) */
-    IntEnable(INT_TIMER2A);
+    IntEnable(INT_TIMER0A);
 
     /* Enable both Timer A and Timer B to begin the application */
     TimerEnable(WTIMER0_BASE, TIMER_A);
@@ -680,7 +679,7 @@ int SMPTE_Decoder_Stop(void)
     TimerDisable(WTIMER0_BASE, TIMER_A);
 
     /* Enable the interrupts for Timer A on the processor (NVIC) */
-    IntDisable(INT_TIMER2A);
+    IntDisable(INT_TIMER0A);
 
     return 0;
 }
