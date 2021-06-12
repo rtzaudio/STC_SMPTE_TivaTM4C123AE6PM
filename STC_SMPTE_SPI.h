@@ -37,8 +37,8 @@
 #define SMPTE_REG_MASK          0x0F00          /* C0-C3 register op-code      */
 
 /* SMPTE Controller Registers (C0-C3) */
-#define SMPTE_REG_REVID         1               /* Generator Cntrl (RO, 16-bit) */
-#define SMPTE_REG_GENCTL        2               /* Generator Cntrl (RW, 8-bit) */
+#define SMPTE_REG_REVID         1               /* Rev=lower nibble(RO, 16-bit)*/
+#define SMPTE_REG_ENCCTL        2               /* Encoder Cntrl   (RW, 8-bit) */
 #define SMPTE_REG_DECCTL        3               /* Decoder Cntrl   (RW, 8-bit) */
 #define SMPTE_REG_STAT          4               /* Decode Status   (RO, 8-bit) */
 #define SMPTE_REG_DATA          5               /* Data Register   (RO, 8-bit) */
@@ -47,15 +47,15 @@
 #define SMPTE_REG_GET(x)        (((x) & SMPTE_REG_MASK) >> 8)
 
 /* SMPTE_REG_GENCTL Register (B0-B7) */
-#define SMPTE_GENCTL_FPS24      0               /* Generator set for 24 FPS    */
-#define SMPTE_GENCTL_FPS25      1               /* Generator set for 25 FPS    */
-#define SMPTE_GENCTL_FPS30      2               /* Generator set for 30 FPS    */
-#define SMPTE_GENCTL_FPS30D     3               /* Set for 30 FPS drop frame   */
+#define SMPTE_ENCCTL_FPS24      0               /* Generator set for 24 FPS    */
+#define SMPTE_ENCCTL_FPS25      1               /* Generator set for 25 FPS    */
+#define SMPTE_ENCCTL_FPS30      2               /* Generator set for 30 FPS    */
+#define SMPTE_ENCCTL_FPS30D     3               /* Set for 30 FPS drop frame   */
 
-#define SMPTE_GENCTL_FPS(x)     (((x) & 0x03))
-#define SMPTE_GENCTL_RESUME     (1 << 2)        /* do not reset time on start  */
-#define SMPTE_GENCTL_ENABLE     (1 << 7)        /* SMPTE generator enable bit  */
-#define SMPTE_GENCTL_DISABLE    (0)
+#define SMPTE_ENCCTL_FPS(x)     (((x) & 0x03))
+#define SMPTE_ENCCTL_RESUME     (1 << 2)        /* do not reset time on start  */
+#define SMPTE_ENCCTL_ENABLE     (1 << 7)        /* SMPTE generator enable bit  */
+#define SMPTE_ENCCTL_DISABLE    (0)
 
 #endif /*_STC_SMPTE_SPI_H_*/
 
