@@ -106,6 +106,8 @@
 #include "Utils.h"
 #include "libltc\ltc.h"
 
+#define SMPTE_DECORDER  1
+
 /* Constants and Macros */
 
 /* pulse width: 416.7us(30fps)
@@ -148,8 +150,6 @@ static SMPTETimecode g_rxTime;
 
 static uint8_t* code = (uint8_t*)&g_rxFrame;
 static bool g_firsttime = true;
-
-
 
 /* Static Function Prototypes */
 Int main();
@@ -197,10 +197,12 @@ Int main()
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
 
     /* Setup callback Hwi handler the SMPTE pulse stream input */
+#if (SMPTE_DECORDER == 0)
     GPIO_setCallback(Board_SMPTE_IN, gpioStreamInHwi);
 
     /* Enable the SMPTE input stream interrupts */
     GPIO_enableInt(Board_SMPTE_IN);
+#endif
 
     /* Now start the main application button polling task */
 
@@ -506,22 +508,23 @@ int SMPTE_Encoder_Start(void)
      */
     GPIO_write(Board_RELAY, Board_RELAY_ON);
     Task_sleep(50);
-
     /* Turn the LED on to indicate active */
     GPIO_write(Board_STAT_LED, Board_LED_ON);
-
     /* SMPTE output pin low initially */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
 
+    /* First make sure the timer is disabled */
+    TimerDisable(WTIMER1_BASE, TIMER_A);
+    /* Disable global interrupts */
+    IntMasterDisable();
     /* Set the TIMER1B load value to 1ms */
     TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock/clockrate);
-
     /* Configure the TIMER1B interrupt for timer timeout */
     TimerIntEnable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
     /* Enable the TIMER1B interrupt on the processor (NVIC) */
     IntEnable(INT_WTIMER1A);
-
+    /* Enable master interrupts */
+    IntMasterEnable();
     /* Enable TIMER1A */
     TimerEnable(WTIMER1_BASE, TIMER_A);
 
@@ -539,19 +542,15 @@ int SMPTE_Encoder_Stop(void)
 
     /* Disable TIMER1A */
     TimerDisable(WTIMER1_BASE, TIMER_A);
-
     /* Disable the TIMER1A interrupt */
     IntDisable(INT_WTIMER1A);
-
     /* Turn off TIMER1B interrupt */
     TimerIntDisable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
     /* Clear any pending interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
 
     /* SMPTE output pin low */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
-
     /* Relay and LED off */
     GPIO_write(Board_RELAY, Board_RELAY_OFF);
     GPIO_write(Board_STAT_LED, Board_LED_OFF);
@@ -610,8 +609,8 @@ Void Timer1AIntHandler(UArg arg)
         ++g_txBitCount;
 
         /* Toggle the status LED on high bits */
-        if (g_txBitState)
-            GPIO_toggle(Board_STAT_LED);
+        //if (g_txBitState)
+        //    GPIO_toggle(Board_STAT_LED);
     }
 }
 
@@ -625,6 +624,14 @@ Void Timer1BIntHandler(UArg arg)
 // SMPTE Decoder Hardware Receive Interrupt Handler
 //*****************************************************************************
 
+//static int mode;
+static int oneflg = 0;
+static int count = 0;
+static int drop = 0;
+static int fps = 0;
+
+#if (SMPTE_DECORDER == 0)
+
 int SMPTE_Decoder_Start(void)
 {
     g_firsttime = true;
@@ -635,15 +642,16 @@ int SMPTE_Decoder_Start(void)
     /* Reset the frame buffer */
     ltc_frame_reset(&g_rxFrame);
 
+    /* First make sure the timer is disabled */
+    TimerDisable(WTIMER0_BASE, TIMER_A);
+
+    /* Disable global interrupts */
+    IntMasterDisable();
+
     /* Enable the SMPTE input stream interrupts */
     GPIO_enableInt(Board_SMPTE_IN);
 
-    /* Configure the GPIO to be CCP pins for the timer peripheral */
-    //GPIOPinConfigure(GPIO_PC4_WT0CCP0);
-    //GPIOPinConfigure(GPIO_PC5_T2CCP1);
-
     /* Initialize Timer A to run as periodic up-count edge capture */
-    //TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP);
     TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_PERIODIC | TIMER_CFG_A_PERIODIC_UP);
 
     /* To use the timer in Edge Time mode, it must be preloaded with initial
@@ -655,25 +663,15 @@ int SMPTE_Decoder_Start(void)
     TimerLoadSet(WTIMER0_BASE, TIMER_A, 0);
     //TimerPrescaleSet(WTIMER0_BASE, TIMER_A, 0xFF);
 
-    // Configure Timer A to trigger on both edges
-    //TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_BOTH_EDGES);
-
-    /* Clear the interrupt status flag.  This is done to make sure the
-     * interrupt flag is cleared before we enable it.
-     */
-    //TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
-
-    /* Enable the Timer A and B interrupts for Capture Events */
-    //TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
-
-    /* Enable the interrupts for Timer A and Timer B on the processor (NVIC) */
-    //IntEnable(INT_TIMER0A);
+    /* Enable global interrupts */
+    IntMasterEnable();
 
     /* Enable both Timer A and Timer B to begin the application */
     TimerEnable(WTIMER0_BASE, TIMER_A);
 
     return 0;
 }
+
 
 int SMPTE_Decoder_Stop(void)
 {
@@ -683,105 +681,8 @@ int SMPTE_Decoder_Stop(void)
     /* Enable both Timer A and Timer B to begin the application */
     TimerDisable(WTIMER0_BASE, TIMER_A);
 
-    /* Enable the interrupts for Timer A on the processor (NVIC) */
-    //IntDisable(INT_TIMER0A);
-
     return 0;
 }
-
-//*****************************************************************************
-// SMPTE Input Pin Toggle Interrupt Handler
-//*****************************************************************************
-
-//static int mode;
-static int oneflg = 0;
-static int count = 0;
-static int drop = 0;
-static int fps = 0;
-
-#if 0
-Void Timer0AIntHandler(UArg arg)
-{
-    uint32_t i, b, t;
-
-    /* Clear the timer interrupt flag */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
-
-    /* In Edge Time Mode, the prescaler is used for the most significant bits.
-     * Therefore, it must be shifted by 16 before being added onto the final value.
-     */
-    t = TimerValueGet(WTIMER0_BASE, TIMER_A);
-
-    /* Determine the pulse width time in uSec */
-    //t /= 80;
-
-    if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
-    {
-        if (oneflg == 0)
-        {
-            oneflg = 1;
-            return;
-        }
-        else
-        {
-            oneflg = 0;
-            b = 1;
-        }
-    }
-    else if (t >= ZERO_TIME_MIN && t < ZERO_TIME_MAX)
-    {
-        oneflg = 0;
-        b = 0;
-
-        if (t >= FPS24_REF - 10 && t <= FPS24_REF + 10)
-        {
-            fps = 0;
-        }
-        else if (t >= FPS25_REF - 10 && t <= FPS25_REF + 10)
-        {
-            fps = 1;
-        }
-        else if (t >= FPS30_REF - 10 && t <= FPS30_REF + 10)
-        {
-            fps = drop ? 2 : 3; // 29.97 / 30
-        }
-    }
-    else
-    {
-        oneflg = 0;
-        count = 0;
-        return;
-    }
-
-    for (i=0; i < 9; i ++)
-    {
-        code[i] = (code[i] >> 1) | ((code[i + 1] & 1) ? 0x80 : 0);
-    }
-
-    code[9] = (code[9] >> 1) | (b ? 0x80 : 0);
-
-    count++;
-
-    if ((code[8] == 0xFC) && (code[9] == 0xBF) && (count >= 80))
-    {
-        //parse_code();
-
-        /* Get time members in the smpte frame */
-        ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
-
-        count = 0;
-    }
-}
-
-Void Timer0BIntHandler(UArg arg)
-{
-    uint32_t status = TimerIntStatus(WTIMER0_BASE, false);
-
-    /* Clear the timer interrupt flag */
-    TimerIntClear(WTIMER0_BASE, status);
-}
-#endif
-
 
 void gpioStreamInHwi(unsigned int index)
 {
@@ -876,19 +777,181 @@ void gpioStreamInHwi(unsigned int index)
     }
 }
 
+#else
 
-#if 0
-void LTC_SMPTE::parse_code()
+//*****************************************************************************
+// EDGE TIME INTERRUPT METHOD
+//*****************************************************************************
+
+int SMPTE_Decoder_Start(void)
 {
-    frame = (code[1] & 0x03) * 10 + (code[0] & 0x0f);
-    sec   = (code[3] & 0x07) * 10 + (code[2] & 0x0f);
-    min   = (code[5] & 0x07) * 10 + (code[4] & 0x0f);
-    hour  = (code[7] & 0x03) * 10 + (code[6] & 0x0f);
-    drop  = code[1] & (1<<2) ? 1 : 0;
-    received = 1;
+    g_firsttime = true;
+
+    /* Zero out the starting time struct */
+    memset(&g_rxTime, 0, sizeof(g_rxTime));
+
+    /* Reset the frame buffer */
+    ltc_frame_reset(&g_rxFrame);
+
+    /* First make sure the timer is disabled */
+    TimerDisable(WTIMER0_BASE, TIMER_A);
+    TimerDisable(WTIMER0_BASE, TIMER_B);
+
+    /* Disable global interrupts */
+    IntMasterDisable();
+
+    /* Configure the GPIO to be CCP pins for the timer peripheral */
+    GPIOPinConfigure(GPIO_PC4_WT0CCP0);
+    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
+
+    /* Initialize Timer A to run as periodic up-count edge capture */
+    TimerConfigure(WTIMER0_BASE,
+                   TIMER_CFG_SPLIT_PAIR |
+                   TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP |
+                   TIMER_CFG_B_PERIODIC);
+
+    /* Define event which generates interrupt on timer A */
+    TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_BOTH_EDGES);
+
+    /* Load set timer with the edge count to interrupt at */
+    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0);
+    //TimerPrescaleSet(WTIMER0_BASE, TIMER_A, 0xFF);
+
+    /* Clear the interrupt status flag.  This is done to make sure the
+     * interrupt flag is cleared before we enable it.
+     */
+    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+
+    /* Enable the Timer A and B interrupts for Capture Events */
+    TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
+
+    /* Enable the interrupts for Timer A and Timer B on the processor (NVIC) */
+    IntEnable(INT_TIMER0A);
+    IntEnable(INT_TIMER0B);
+
+    /* Enable global interrupts */
+    IntMasterEnable();
+
+    /* Enable both Timer A and Timer B to begin the application */
+    TimerEnable(WTIMER0_BASE, TIMER_BOTH);
+
+    return 0;
 }
 
+int SMPTE_Decoder_Stop(void)
+{
+    TimerDisable(WTIMER0_BASE, TIMER_A);
+    TimerDisable(WTIMER0_BASE, TIMER_B);
 
+    /* Disable global interrupts */
+    IntMasterDisable();
+
+    /* Disable the interrupts */
+    IntDisable(INT_WTIMER0A);
+    IntDisable(INT_WTIMER0B);
+
+    /* Turn off TIMER1B interrupt */
+    TimerIntDisable(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    TimerIntDisable(WTIMER0_BASE, TIMER_TIMB_TIMEOUT);
+
+    /* Clear any pending interrupt flag */
+    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    TimerIntClear(WTIMER0_BASE, TIMER_TIMB_TIMEOUT);
+
+    /* Enable global interrupts */
+    IntMasterEnable();
+
+    return 0;
+}
+
+//*****************************************************************************
+// SMPTE Input Pin Toggle Interrupt Handler
+//*****************************************************************************
+
+Void Timer0AIntHandler(UArg arg)
+{
+    uint32_t i, b, t;
+
+    /* Clear the timer interrupt flag */
+    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+
+    /* In Edge Time Mode, the prescaler is used for the most significant bits.
+     * Therefore, it must be shifted by 16 before being added onto the final value.
+     */
+    t = TimerValueGet(WTIMER0_BASE, TIMER_A);
+
+    /* Determine the pulse width time in uSec */
+    //t /= 80;
+
+    if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
+    {
+        if (oneflg == 0)
+        {
+            oneflg = 1;
+            return;
+        }
+        else
+        {
+            oneflg = 0;
+            b = 1;
+        }
+    }
+    else if (t >= ZERO_TIME_MIN && t < ZERO_TIME_MAX)
+    {
+        oneflg = 0;
+        b = 0;
+
+        if (t >= FPS24_REF - 10 && t <= FPS24_REF + 10)
+        {
+            fps = 0;
+        }
+        else if (t >= FPS25_REF - 10 && t <= FPS25_REF + 10)
+        {
+            fps = 1;
+        }
+        else if (t >= FPS30_REF - 10 && t <= FPS30_REF + 10)
+        {
+            fps = drop ? 2 : 3; // 29.97 / 30
+        }
+    }
+    else
+    {
+        oneflg = 0;
+        count = 0;
+        return;
+    }
+
+    for (i=0; i < 9; i ++)
+    {
+        code[i] = (code[i] >> 1) | ((code[i + 1] & 1) ? 0x80 : 0);
+    }
+
+    code[9] = (code[9] >> 1) | (b ? 0x80 : 0);
+
+    count++;
+
+    if ((code[8] == 0xFC) && (code[9] == 0xBF) && (count >= 80))
+    {
+        //parse_code();
+
+        /* Get time members in the smpte frame */
+        ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
+
+        count = 0;
+    }
+}
+
+Void Timer0BIntHandler(UArg arg)
+{
+    uint32_t status = TimerIntStatus(WTIMER0_BASE, false);
+
+    /* Clear the timer interrupt flag */
+    TimerIntClear(WTIMER0_BASE, status);
+}
+#endif
+
+
+#if 0
 handleInterrupt() {
   noInterrupts(); // stop being interrupted (got to hurry not to miss the next one)
   long time = micros(); // record curent time (in micro-seconds)
