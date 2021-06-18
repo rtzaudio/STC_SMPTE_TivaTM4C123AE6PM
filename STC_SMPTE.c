@@ -610,8 +610,8 @@ Void Timer1AIntHandler(UArg arg)
         ++g_txBitCount;
 
         /* Toggle the status LED on high bits */
-        if (g_txBitState)
-            GPIO_toggle(Board_STAT_LED);
+        //if (g_txBitState)
+        //    GPIO_toggle(Board_STAT_LED);
     }
 }
 
@@ -640,7 +640,7 @@ int SMPTE_Decoder_Start(void)
 
     /* Configure the GPIO to be CCP pins for the timer peripheral */
     //GPIOPinConfigure(GPIO_PC4_WT0CCP0);
-    //GPIOPinConfigure(GPIO_PC5_T2CCP1);
+    //GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
 
     /* Initialize Timer A to run as periodic up-count edge capture */
     //TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP);
