@@ -627,6 +627,10 @@ Void Timer1BIntHandler(UArg arg)
 
 int SMPTE_Decoder_Start(void)
 {
+    /* Make sure the decoder interrupt isn't enabled first */
+    SMPTE_Decoder_Stop();
+
+    /* Reset first edge time capture flag */
     g_firsttime = true;
 
     /* Zero out the starting time struct */
