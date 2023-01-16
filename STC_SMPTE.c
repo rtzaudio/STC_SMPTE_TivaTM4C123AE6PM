@@ -134,7 +134,7 @@ static int  g_frame_rate = 30;
 static bool g_drop_frame = false;
 
 /* SMPTE Encoder variables */
-static bool g_txRunning = false;
+static bool g_encoderEnabled = false;
 static uint8_t  g_txBitState = 0;
 static uint8_t  g_txHalfBit = 0;
 static uint32_t g_txBitCount = 0;
@@ -143,26 +143,33 @@ static LTCFrame g_txFrame;
 static SMPTETimecode g_txTime;
 
 /* SMPTE Decoder variables */
+static bool g_decoderEnabled = false;
 static LTCFrame g_rxFrame;
 static SMPTETimecode g_rxTime;
-
-static uint8_t* code = (uint8_t*)&g_rxFrame;
+static uint8_t* const code = (uint8_t*)&g_rxFrame;
 static bool g_firsttime = true;
 
+/*
+ * Function Prototypes
+ */
 
-
-/* Static Function Prototypes */
 Int main();
+
 int SMPTE_Encoder_Start();
 int SMPTE_Encoder_Stop(void);
+void SMPTE_Encoder_Reset(void);
+
 int SMPTE_Decoder_Start();
 int SMPTE_Decoder_Stop(void);
-void SMPTE_Encoder_Reset(void);
+void SMPTE_Decoder_Reset(void);
+
 Void SPI_SlaveTask(UArg a0, UArg a1);
+
 Void Timer1AIntHandler(UArg arg);
 Void Timer1BIntHandler(UArg arg);
 Void Timer0AIntHandler(UArg arg);
 Void Timer0BIntHandler(UArg arg);
+
 void gpioStreamInHwi(unsigned int index);
 
 //*****************************************************************************
@@ -291,16 +298,31 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 
         if (!success)
         {
+            /* Loop if error reading SPI! */
             System_printf("SPI slave rx failed\n");
             System_flush();
-            /* Loop if error reading SPI! */
             continue;
         }
 
-        uint8_t opcode = (ulRequest & SMPTE_REG_MASK) >> 8;
+        /* SMPTE CONTROLLER SPI SLAVE REGISTERS
+         *
+         * All registers are 16-bits with the upper word containing the command
+         * and flag bits. The lower 8-bits contains any associated data byte.
+         *
+         *   +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+         *   | R | A | A | A | C | C | C | C | B | B | B | B | B | B | B | B |
+         *   | W | 6 | 5 | 4 | 3 | 2 | 1 | 0 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+         *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+         *     |   |       |   |           |   |                           |
+         *     |   +---+---+   +-----+-----+   +-------------+-------------+
+         *     |       |             |                       |
+         *    R/W     RSVD          REG                  DATA/FLAGS
+         */
 
-        if (opcode == SMPTE_REG_REVID)
+        switch((ulRequest & SMPTE_REG_MASK) >> 8)
         {
+        case SMPTE_REG_REVID:
+
             /* ====================================================
              * SMPTE CARD REV/ID REGISTER (RO)
              * ====================================================
@@ -317,9 +339,10 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             GPIO_write(Board_BUSY, PIN_LOW);
             success = SPI_transfer(hSlave, &transaction2);
             GPIO_write(Board_BUSY, PIN_HIGH);
-        }
-        else if (opcode == SMPTE_REG_ENCCTL)
-        {
+            break;
+
+        case SMPTE_REG_ENCCTL:
+
             /* ====================================================
              * SMPTE GENERATOR CONTROL REGISTER (RW)
              * ====================================================
@@ -332,20 +355,23 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 switch(g_frame_rate)
                 {
                 case 24:
-                    ulReply = SMPTE_ENCCTL_FPS24;
+                    ulReply = SMPTE_CTL_FPS24;
                     break;
+
                 case 25:
-                    ulReply = SMPTE_ENCCTL_FPS25;
+                    ulReply = SMPTE_CTL_FPS25;
                     break;
+
                 case 30:
-                    ulReply = (g_drop_frame) ? SMPTE_ENCCTL_FPS30D : SMPTE_ENCCTL_FPS30;
+                    ulReply = (g_drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
                     break;
+
                 default:
                     ulReply = 0;
                     break;
                 }
 
-                if (g_txRunning)
+                if (g_encoderEnabled)
                     ulReply |= SMPTE_ENCCTL_ENABLE;
 
                 /* Send the reply word back */
@@ -368,22 +394,26 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 /* Determine the frame rate requested */
                 switch(SMPTE_ENCCTL_FPS(ulRequest))
                 {
-                case SMPTE_ENCCTL_FPS24:
+                case SMPTE_CTL_FPS24:
                     g_frame_rate = 24;
                     g_drop_frame = false;
                     break;
-                case SMPTE_ENCCTL_FPS25:
+
+                case SMPTE_CTL_FPS25:
                     g_frame_rate = 25;
                     g_drop_frame = false;
                     break;
-                case SMPTE_ENCCTL_FPS30:
+
+                case SMPTE_CTL_FPS30:
                     g_frame_rate = 30;
                     g_drop_frame = false;
                     break;
-                case SMPTE_ENCCTL_FPS30D:
+
+                case SMPTE_CTL_FPS30D:
                     g_frame_rate = 30;
                     g_drop_frame = true;
                     break;
+
                 default:
                     g_frame_rate = 30;
                     g_drop_frame = true;
@@ -393,13 +423,10 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 /* Start the SMPTE generator if enable flag set */
                 if (ulRequest & SMPTE_ENCCTL_ENABLE)
                 {
-                    /* Don't reset frame counts on resume */
-                    if (!(ulRequest & SMPTE_ENCCTL_RESUME))
-                    {
+                    /* Reset frame counts on requested */
+                    if (ulRequest & SMPTE_ENCCTL_RESET)
                         SMPTE_Encoder_Reset();
-                    }
 
-                    SMPTE_Decoder_Start();
                     SMPTE_Encoder_Start();
                 }
                 else
@@ -407,52 +434,246 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                     SMPTE_Encoder_Stop();
                 }
             }
-        }
-        else if (opcode == SMPTE_REG_STAT)
-        {
+            break;
+
+        case SMPTE_REG_DECCTL:
+
+            /* ====================================================
+             * SMPTE GENERATOR CONTROL REGISTER (RW)
+             * ====================================================
+             */
+
+            if (ulRequest & SMPTE_F_READ)
+            {
+                /* READ SMPTE DECODER CONTROL REGISTER */
+
+                switch(g_frame_rate)
+                {
+                case 24:
+                    ulReply = SMPTE_CTL_FPS24;
+                    break;
+
+                case 25:
+                    ulReply = SMPTE_CTL_FPS25;
+                    break;
+
+                case 30:
+                    ulReply = (g_drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
+                    break;
+
+                default:
+                    ulReply = 0;
+                    break;
+                }
+
+                if (g_decoderEnabled)
+                    ulReply |= SMPTE_DECCTL_ENABLE;
+
+                /* Send the reply word back */
+                transaction2.count = 1;
+                transaction2.txBuf = (Ptr)&ulReply;
+                transaction2.rxBuf = (Ptr)&ulDummy;
+
+                /* Send the SPI transaction */
+                GPIO_write(Board_BUSY, PIN_LOW);
+                success = SPI_transfer(hSlave, &transaction2);
+                GPIO_write(Board_BUSY, PIN_HIGH);
+            }
+            else
+            {
+                /* WRITE SMPTE DECODER CONTROL REGISTER */
+
+                /* Stop the generator if it's already running */
+                SMPTE_Decoder_Stop();
+
+                /* Determine the frame rate requested */
+                switch(SMPTE_DECCTL_FPS(ulRequest))
+                {
+                case SMPTE_CTL_FPS24:
+                    g_frame_rate = 24;
+                    g_drop_frame = false;
+                    break;
+
+                case SMPTE_CTL_FPS25:
+                    g_frame_rate = 25;
+                    g_drop_frame = false;
+                    break;
+
+                case SMPTE_CTL_FPS30:
+                    g_frame_rate = 30;
+                    g_drop_frame = false;
+                    break;
+
+                case SMPTE_CTL_FPS30D:
+                    g_frame_rate = 30;
+                    g_drop_frame = true;
+                    break;
+
+                default:
+                    g_frame_rate = 30;
+                    g_drop_frame = true;
+                    break;
+                }
+
+                /* Start the SMPTE generator if enable flag set */
+                if (ulRequest & SMPTE_DECCTL_ENABLE)
+                {
+                    /* Reset frame counts on requested */
+                    if (ulRequest & SMPTE_DECCTL_RESET)
+                        SMPTE_Decoder_Reset();
+
+                    SMPTE_Decoder_Start();
+                }
+                else
+                {
+                    SMPTE_Decoder_Stop();
+                }
+            }
+            break;
+
+        case SMPTE_REG_STAT:
+
             /* ====================================================
              * SMPTE STATUS REGISTER
              * ====================================================
              */
 
-        }
-        else if (opcode == SMPTE_REG_DATA)
-        {
+            break;
+
+        case SMPTE_REG_DATA:
+
             /* ====================================================
-             * SMPTE STATUS REGISTER
+             * SMPTE DATA REGISTER
              * ====================================================
              */
 
+            break;
+
+        case SMPTE_REG_HOUR:
+
+            /* ====================================================
+             * SMPTE (HOUR) REGISTER (0-23)
+             * ====================================================
+             */
+
+            if (ulRequest & SMPTE_F_READ)
+            {
+                ulReply = (uint16_t)g_txTime.hours;
+
+                /* Send the reply word back */
+                transaction2.count = 1;
+                transaction2.txBuf = (Ptr)&ulReply;
+                transaction2.rxBuf = (Ptr)&ulDummy;
+
+                /* Send the SPI transaction */
+                GPIO_write(Board_BUSY, PIN_LOW);
+                success = SPI_transfer(hSlave, &transaction2);
+                GPIO_write(Board_BUSY, PIN_HIGH);
+            }
+            else
+            {
+                if (ulRequest < 24)
+                {
+                    g_txTime.hours = (uint8_t)ulRequest;
+                }
+            }
+            break;
+
+        case SMPTE_REG_MINS:
+
+            /* ====================================================
+             * SMPTE (MINS) REGISTER (0-59)
+             * ====================================================
+             */
+
+            if (ulRequest & SMPTE_F_READ)
+            {
+                ulReply = (uint16_t)g_txTime.mins;
+
+                /* Send the reply word back */
+                transaction2.count = 1;
+                transaction2.txBuf = (Ptr)&ulReply;
+                transaction2.rxBuf = (Ptr)&ulDummy;
+
+                /* Send the SPI transaction */
+                GPIO_write(Board_BUSY, PIN_LOW);
+                success = SPI_transfer(hSlave, &transaction2);
+                GPIO_write(Board_BUSY, PIN_HIGH);
+            }
+            else
+            {
+                if (ulRequest <= 60)
+                {
+                    g_txTime.mins = (uint8_t)ulRequest;
+                }
+            }
+            break;
+
+        case SMPTE_REG_SECS:
+
+            /* ====================================================
+             * SMPTE (SECS) REGISTER (0-59)
+             * ====================================================
+             */
+
+            if (ulRequest & SMPTE_F_READ)
+            {
+                ulReply = (uint16_t)g_txTime.secs;
+
+                /* Send the reply word back */
+                transaction2.count = 1;
+                transaction2.txBuf = (Ptr)&ulReply;
+                transaction2.rxBuf = (Ptr)&ulDummy;
+
+                /* Send the SPI transaction */
+                GPIO_write(Board_BUSY, PIN_LOW);
+                success = SPI_transfer(hSlave, &transaction2);
+                GPIO_write(Board_BUSY, PIN_HIGH);
+            }
+            else
+            {
+                if (ulRequest <= 60)
+                {
+                    g_txTime.secs = (uint8_t)ulRequest;
+                }
+            }
+            break;
+
+        case SMPTE_REG_FRAME:
+
+            /* ====================================================
+             * SMPTE (FRAME) NUMBER REGISTER (0-29)
+             * ====================================================
+             */
+
+            if (ulRequest & SMPTE_F_READ)
+            {
+                ulReply = (uint16_t)g_txTime.frame;
+
+                /* Send the reply word back */
+                transaction2.count = 1;
+                transaction2.txBuf = (Ptr)&ulReply;
+                transaction2.rxBuf = (Ptr)&ulDummy;
+
+                /* Send the SPI transaction */
+                GPIO_write(Board_BUSY, PIN_LOW);
+                success = SPI_transfer(hSlave, &transaction2);
+                GPIO_write(Board_BUSY, PIN_HIGH);
+            }
+            else
+            {
+                if (ulRequest < 30)
+                {
+                    g_txTime.frame = (uint8_t)ulRequest;
+                }
+            }
+            break;
+
+        default:
+            /* Unknown command */
+            break;
         }
     }
-}
-
-//*****************************************************************************
-// Reset SMPTE generator start time
-//*****************************************************************************
-
-void SMPTE_Encoder_Reset(void)
-{
-    /* Zero out the starting time struct */
-    memset(&g_txTime, 0, sizeof(g_txTime));
-
-    /* Set default time zone */
-    strcpy(g_txTime.timezone, timezone);
-
-  //g_txTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
-  //g_txTime.months = 1;        /* valid months are 1..12            */
-  //g_txTime.days   = 1;        /* day of month 1..31                */
-
-    g_txTime.hours  = 0;        /* hour 0..23                        */
-    g_txTime.mins   = 0;        /* minute 0..60                      */
-    g_txTime.secs   = 0;        /* second 0..60                      */
-    g_txTime.frame  = 0;        /* sub-second frame 0..(FPS - 1)     */
-
-    /* Reset the frame buffer */
-    ltc_frame_reset(&g_txFrame);
-
-    /* Set the starting time members in the smpte frame */
-    ltc_time_to_frame(&g_txFrame, &g_txTime, LTC_TV_525_60, 0);
 }
 
 //*****************************************************************************
@@ -463,7 +684,7 @@ int SMPTE_Encoder_Start(void)
 {
     uint32_t clockrate;
 
-    if (g_txRunning)
+    if (g_encoderEnabled)
         return -1;
 
     /* Setup timer interrupt 2x bit clocks:
@@ -478,14 +699,17 @@ int SMPTE_Encoder_Start(void)
         /* 24 fps */
         clockrate = 3840;
         break;
+
     case 25:
         /* 25 fps */
         clockrate = 4000;
         break;
+
     case 30:
         /* 30 fps */
         clockrate = 4800;
         break;
+
     default:
         /* default to 30 fps */
         g_frame_rate = 30;
@@ -496,7 +720,7 @@ int SMPTE_Encoder_Start(void)
     g_txFrameCount = 0;
     g_txBitCount = 0;
     g_txHalfBit = 0;
-    g_txRunning = true;
+    g_encoderEnabled = true;
 
     /* Pre-load the state of the first bit in the frame */
     g_txBitState = FRAME_BITSTATE(((uint8_t*)&g_txFrame), g_txBitCount);
@@ -534,7 +758,7 @@ int SMPTE_Encoder_Start(void)
 
 int SMPTE_Encoder_Stop(void)
 {
-    if (!g_txRunning)
+    if (!g_encoderEnabled)
         return 0;
 
     /* Disable TIMER1A */
@@ -556,9 +780,37 @@ int SMPTE_Encoder_Stop(void)
     GPIO_write(Board_RELAY, Board_RELAY_OFF);
     GPIO_write(Board_STAT_LED, Board_LED_OFF);
 
-    g_txRunning = false;
+    g_encoderEnabled = false;
 
     return 1;
+}
+
+//*****************************************************************************
+// Reset SMPTE generator start time
+//*****************************************************************************
+
+void SMPTE_Encoder_Reset(void)
+{
+    /* Zero out the starting time struct */
+    memset(&g_txTime, 0, sizeof(g_txTime));
+
+    /* Set default time zone */
+    strcpy(g_txTime.timezone, timezone);
+
+  //g_txTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
+  //g_txTime.months = 1;        /* valid months are 1..12            */
+  //g_txTime.days   = 1;        /* day of month 1..31                */
+
+    g_txTime.hours  = 0;        /* hour 0..23                        */
+    g_txTime.mins   = 0;        /* minute 0..60                      */
+    g_txTime.secs   = 0;        /* second 0..60                      */
+    g_txTime.frame  = 0;        /* sub-second frame 0..(FPS - 1)     */
+
+    /* Reset the frame buffer */
+    ltc_frame_reset(&g_txFrame);
+
+    /* Set the starting time members in the smpte frame */
+    ltc_time_to_frame(&g_txFrame, &g_txTime, LTC_TV_525_60, 0);
 }
 
 //*****************************************************************************
@@ -622,7 +874,7 @@ Void Timer1BIntHandler(UArg arg)
 }
 
 //*****************************************************************************
-// SMPTE Decoder Hardware Receive Interrupt Handler
+// Start the SMPTE Decoder
 //*****************************************************************************
 
 int SMPTE_Decoder_Start(void)
@@ -679,6 +931,10 @@ int SMPTE_Decoder_Start(void)
     return 0;
 }
 
+//*****************************************************************************
+// Stop the SMPTE Decoder
+//*****************************************************************************
+
 int SMPTE_Decoder_Stop(void)
 {
     /* Enable the SMPTE input stream interrupts */
@@ -691,6 +947,34 @@ int SMPTE_Decoder_Stop(void)
     //IntDisable(INT_TIMER0A);
 
     return 0;
+}
+
+//*****************************************************************************
+// Reset the SMPTE Decoder
+//*****************************************************************************
+
+Void SMPTE_Decoder_Reset(void)
+{
+    /* Zero out the starting time struct */
+    memset(&g_rxTime, 0, sizeof(g_rxTime));
+
+    /* Set default time zone */
+    strcpy(g_rxTime.timezone, timezone);
+
+  //g_rxTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
+  //g_rxTime.months = 1;        /* valid months are 1..12            */
+  //g_rxTime.days   = 1;        /* day of month 1..31                */
+
+    g_rxTime.hours  = 0;        /* hour 0..23                        */
+    g_rxTime.mins   = 0;        /* minute 0..60                      */
+    g_rxTime.secs   = 0;        /* second 0..60                      */
+    g_rxTime.frame  = 0;        /* sub-second frame 0..(FPS - 1)     */
+
+    /* Reset the frame buffer */
+    ltc_frame_reset(&g_rxFrame);
+
+    /* Set the starting time members in the smpte frame */
+    ltc_time_to_frame(&g_rxFrame, &g_rxTime, LTC_TV_525_60, 0);
 }
 
 //*****************************************************************************

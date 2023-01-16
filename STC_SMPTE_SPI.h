@@ -2,6 +2,8 @@
  *
  * STC_SMPTE Time Code Controller for Ampex MM-1200 Tape Machines
  *
+ * SMPTE-SPI v1.02
+ *
  * Copyright (C) 2021, RTZ Professional Audio, LLC
  * All Rights Reserved
  *
@@ -42,21 +44,32 @@
 #define SMPTE_REG_DECCTL        3               /* Decoder Cntrl   (RW, 8-bit) */
 #define SMPTE_REG_STAT          4               /* Decode Status   (RO, 8-bit) */
 #define SMPTE_REG_DATA          5               /* Data Register   (RO, 8-bit) */
+#define SMPTE_REG_HOUR          6               /* Hour (0-1)      (RW, 8-bit) */
+#define SMPTE_REG_MINS          7               /* Minutes (0-59)  (RW, 8-bit) */
+#define SMPTE_REG_SECS          8               /* Seconds (0-59)  (RW, 8-bit) */
+#define SMPTE_REG_FRAME         9               /* Frame# (0-29)   (RW, 8-bit) */
 
 #define SMPTE_REG_SET(x)        (((x) << 8) & SMPTE_REG_MASK)
 #define SMPTE_REG_GET(x)        (((x) & SMPTE_REG_MASK) >> 8)
 
-/* SMPTE_REG_GENCTL Register (B0-B7) */
-#define SMPTE_ENCCTL_FPS24      0               /* Generator set for 24 FPS    */
-#define SMPTE_ENCCTL_FPS25      1               /* Generator set for 25 FPS    */
-#define SMPTE_ENCCTL_FPS30      2               /* Generator set for 30 FPS    */
-#define SMPTE_ENCCTL_FPS30D     3               /* Set for 30 FPS drop frame   */
+/* Control bits for Encoder and Decoder (B0-B1) */
+#define SMPTE_CTL_FPS24         0               /* Generator set for 24 FPS    */
+#define SMPTE_CTL_FPS25         1               /* Generator set for 25 FPS    */
+#define SMPTE_CTL_FPS30         2               /* Generator set for 30 FPS    */
+#define SMPTE_CTL_FPS30D        3               /* Set for 30 FPS drop frame   */
 
+/* Encoder SMPTE_REG_ENCCTL Register (B0-B7) */
 #define SMPTE_ENCCTL_FPS(x)     (((x) & 0x03))
-#define SMPTE_ENCCTL_RESUME     (1 << 2)        /* do not reset time on start  */
+#define SMPTE_ENCCTL_RESET      (1 << 2)        /* reset time before starting  */
 #define SMPTE_ENCCTL_ENABLE     (1 << 7)        /* SMPTE generator enable bit  */
 #define SMPTE_ENCCTL_DISABLE    (0)
 
-#endif /*_STC_SMPTE_SPI_H_*/
+/* Decoder SMPTE_REG_DECCTL Register (B0-B7) */
+#define SMPTE_DECCTL_FPS(x)     (((x) & 0x03))
+#define SMPTE_DECCTL_RESET      (1 << 2)        /* reset SMPTE frame decoder   */
+#define SMPTE_DECCTL_ENABLE     (1 << 7)        /* SMPTE decoder enable bit    */
+#define SMPTE_DECCTL_DISABLE    (0)
+
+#endif /* _STC_SMPTE_SPI_H_ */
 
 /* End-Of-File */
