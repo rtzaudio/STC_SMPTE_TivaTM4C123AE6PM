@@ -1162,6 +1162,8 @@ void gpioStreamInHwi(unsigned int index)
 
         count = 0;
     }
+
+    (void)fps;
 }
 
 

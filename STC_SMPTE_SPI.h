@@ -37,6 +37,7 @@
 
 /* Register number bits */
 #define SMPTE_REG_MASK          0x0F00          /* C0-C3 register op-code      */
+#define SMPTE_DATA_MASK         0x000F          /* B0-B7 8-bits of data        */
 
 /* SMPTE Controller Registers (C0-C3) */
 #define SMPTE_REG_REVID         1               /* Rev=lower nibble(RO, 16-bit)*/
@@ -49,10 +50,13 @@
 #define SMPTE_REG_SECS          8               /* Seconds (0-59)  (RW, 8-bit) */
 #define SMPTE_REG_FRAME         9               /* Frame# (0-29)   (RW, 8-bit) */
 
+/* Helpful macros for combining bit masks */
 #define SMPTE_REG_SET(x)        (((x) << 8) & SMPTE_REG_MASK)
 #define SMPTE_REG_GET(x)        (((x) & SMPTE_REG_MASK) >> 8)
+#define SMPTE_DATA_SET(x)       (x & SMPTE_DATA_MASK)
+#define SMPTE_DATA_GET(x)       (x & SMPTE_DATA_MASK)
 
-/* Control bits for Encoder and Decoder (B0-B1) */
+/* Control bits for encoder or decoder (B0-B1) */
 #define SMPTE_CTL_FPS24         0               /* Generator set for 24 FPS    */
 #define SMPTE_CTL_FPS25         1               /* Generator set for 25 FPS    */
 #define SMPTE_CTL_FPS30         2               /* Generator set for 30 FPS    */
