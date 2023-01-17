@@ -234,9 +234,10 @@ Int main()
 Void SPI_SlaveTask(UArg a0, UArg a1)
 {
     bool success;
-    uint16_t ulRequest;
-    uint16_t ulReply;
-    uint16_t ulDummy;
+    uint16_t uRequest;
+    uint16_t uReply;
+    uint16_t uDummy;
+    uint16_t uData;
     SPI_Transaction transaction1;
     SPI_Transaction transaction2;
     SPI_Params spiParams;
@@ -284,11 +285,11 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 
     for(;;)
     {
-        ulReply = ulRequest = ulDummy = 0;
+        uReply = uRequest = uDummy = 0;
 
         transaction1.count = 1;
-        transaction1.txBuf = (Ptr)&ulDummy;
-        transaction1.rxBuf = (Ptr)&ulRequest;
+        transaction1.txBuf = (Ptr)&uDummy;
+        transaction1.rxBuf = (Ptr)&uRequest;
 
         /* Send the SPI transaction */
 
@@ -319,7 +320,10 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
          *    R/W     RSVD          REG                  DATA/FLAGS
          */
 
-        switch((ulRequest & SMPTE_REG_MASK) >> 8)
+        /* lower 8-bits contats data or flags */
+        uData = uRequest & SMPTE_DATA_MASK;
+
+        switch((uRequest & SMPTE_REG_MASK) >> 8)
         {
         case SMPTE_REG_REVID:
 
@@ -328,12 +332,12 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
              * ====================================================
              */
 
-            ulReply = SMPTE_REVID;
+            uReply = SMPTE_REVID;
 
             /* Send the reply word back */
             transaction2.count = 1;
-            transaction2.txBuf = (Ptr)&ulReply;
-            transaction2.rxBuf = (Ptr)&ulDummy;
+            transaction2.txBuf = (Ptr)&uReply;
+            transaction2.rxBuf = (Ptr)&uDummy;
 
             /* Send the SPI transaction */
             GPIO_write(Board_BUSY, PIN_LOW);
@@ -348,36 +352,36 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
              * ====================================================
              */
 
-            if (ulRequest & SMPTE_F_READ)
+            if (uRequest & SMPTE_F_READ)
             {
                 /* READ SMPTE GENERATOR CONTROL REGISTER */
 
                 switch(g_frame_rate)
                 {
                 case 24:
-                    ulReply = SMPTE_CTL_FPS24;
+                    uReply = SMPTE_CTL_FPS24;
                     break;
 
                 case 25:
-                    ulReply = SMPTE_CTL_FPS25;
+                    uReply = SMPTE_CTL_FPS25;
                     break;
 
                 case 30:
-                    ulReply = (g_drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
+                    uReply = (g_drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
                     break;
 
                 default:
-                    ulReply = 0;
+                    uReply = 0;
                     break;
                 }
 
                 if (g_encoderEnabled)
-                    ulReply |= SMPTE_ENCCTL_ENABLE;
+                    uReply |= SMPTE_ENCCTL_ENABLE;
 
                 /* Send the reply word back */
                 transaction2.count = 1;
-                transaction2.txBuf = (Ptr)&ulReply;
-                transaction2.rxBuf = (Ptr)&ulDummy;
+                transaction2.txBuf = (Ptr)&uReply;
+                transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
                 GPIO_write(Board_BUSY, PIN_LOW);
@@ -392,7 +396,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 SMPTE_Encoder_Stop();
 
                 /* Determine the frame rate requested */
-                switch(SMPTE_ENCCTL_FPS(ulRequest))
+                switch(SMPTE_ENCCTL_FPS(uRequest))
                 {
                 case SMPTE_CTL_FPS24:
                     g_frame_rate = 24;
@@ -421,17 +425,13 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 }
 
                 /* Start the SMPTE generator if enable flag set */
-                if (ulRequest & SMPTE_ENCCTL_ENABLE)
+                if (uRequest & SMPTE_ENCCTL_ENABLE)
                 {
                     /* Reset frame counts on requested */
-                    if (ulRequest & SMPTE_ENCCTL_RESET)
+                    if (uRequest & SMPTE_ENCCTL_RESET)
                         SMPTE_Encoder_Reset();
 
                     SMPTE_Encoder_Start();
-                }
-                else
-                {
-                    SMPTE_Encoder_Stop();
                 }
             }
             break;
@@ -443,36 +443,36 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
              * ====================================================
              */
 
-            if (ulRequest & SMPTE_F_READ)
+            if (uRequest & SMPTE_F_READ)
             {
                 /* READ SMPTE DECODER CONTROL REGISTER */
 
                 switch(g_frame_rate)
                 {
                 case 24:
-                    ulReply = SMPTE_CTL_FPS24;
+                    uReply = SMPTE_CTL_FPS24;
                     break;
 
                 case 25:
-                    ulReply = SMPTE_CTL_FPS25;
+                    uReply = SMPTE_CTL_FPS25;
                     break;
 
                 case 30:
-                    ulReply = (g_drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
+                    uReply = (g_drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
                     break;
 
                 default:
-                    ulReply = 0;
+                    uReply = 0;
                     break;
                 }
 
                 if (g_decoderEnabled)
-                    ulReply |= SMPTE_DECCTL_ENABLE;
+                    uReply |= SMPTE_DECCTL_ENABLE;
 
                 /* Send the reply word back */
                 transaction2.count = 1;
-                transaction2.txBuf = (Ptr)&ulReply;
-                transaction2.rxBuf = (Ptr)&ulDummy;
+                transaction2.txBuf = (Ptr)&uReply;
+                transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
                 GPIO_write(Board_BUSY, PIN_LOW);
@@ -487,7 +487,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 SMPTE_Decoder_Stop();
 
                 /* Determine the frame rate requested */
-                switch(SMPTE_DECCTL_FPS(ulRequest))
+                switch(SMPTE_DECCTL_FPS(uRequest))
                 {
                 case SMPTE_CTL_FPS24:
                     g_frame_rate = 24;
@@ -516,17 +516,13 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 }
 
                 /* Start the SMPTE generator if enable flag set */
-                if (ulRequest & SMPTE_DECCTL_ENABLE)
+                if (uRequest & SMPTE_DECCTL_ENABLE)
                 {
                     /* Reset frame counts on requested */
-                    if (ulRequest & SMPTE_DECCTL_RESET)
+                    if (uRequest & SMPTE_DECCTL_RESET)
                         SMPTE_Decoder_Reset();
 
                     SMPTE_Decoder_Start();
-                }
-                else
-                {
-                    SMPTE_Decoder_Stop();
                 }
             }
             break;
@@ -556,14 +552,14 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
              * ====================================================
              */
 
-            if (ulRequest & SMPTE_F_READ)
+            if (uRequest & SMPTE_F_READ)
             {
-                ulReply = (uint16_t)g_txTime.hours;
+                uReply = (uint16_t)g_txTime.hours;
 
                 /* Send the reply word back */
                 transaction2.count = 1;
-                transaction2.txBuf = (Ptr)&ulReply;
-                transaction2.rxBuf = (Ptr)&ulDummy;
+                transaction2.txBuf = (Ptr)&uReply;
+                transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
                 GPIO_write(Board_BUSY, PIN_LOW);
@@ -572,9 +568,9 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             }
             else
             {
-                if (ulRequest < 24)
+                if (uData < 24)
                 {
-                    g_txTime.hours = (uint8_t)ulRequest;
+                    g_txTime.hours = (uint8_t)uData;
                 }
             }
             break;
@@ -586,14 +582,14 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
              * ====================================================
              */
 
-            if (ulRequest & SMPTE_F_READ)
+            if (uRequest & SMPTE_F_READ)
             {
-                ulReply = (uint16_t)g_txTime.mins;
+                uReply = (uint16_t)g_txTime.mins;
 
                 /* Send the reply word back */
                 transaction2.count = 1;
-                transaction2.txBuf = (Ptr)&ulReply;
-                transaction2.rxBuf = (Ptr)&ulDummy;
+                transaction2.txBuf = (Ptr)&uReply;
+                transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
                 GPIO_write(Board_BUSY, PIN_LOW);
@@ -602,9 +598,9 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             }
             else
             {
-                if (ulRequest <= 60)
+                if (uData <= 60)
                 {
-                    g_txTime.mins = (uint8_t)ulRequest;
+                    g_txTime.mins = (uint8_t)uData;
                 }
             }
             break;
@@ -616,14 +612,14 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
              * ====================================================
              */
 
-            if (ulRequest & SMPTE_F_READ)
+            if (uRequest & SMPTE_F_READ)
             {
-                ulReply = (uint16_t)g_txTime.secs;
+                uReply = (uint16_t)g_txTime.secs;
 
                 /* Send the reply word back */
                 transaction2.count = 1;
-                transaction2.txBuf = (Ptr)&ulReply;
-                transaction2.rxBuf = (Ptr)&ulDummy;
+                transaction2.txBuf = (Ptr)&uReply;
+                transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
                 GPIO_write(Board_BUSY, PIN_LOW);
@@ -632,9 +628,9 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             }
             else
             {
-                if (ulRequest <= 60)
+                if (uData <= 60)
                 {
-                    g_txTime.secs = (uint8_t)ulRequest;
+                    g_txTime.secs = (uint8_t)uData;
                 }
             }
             break;
@@ -646,14 +642,14 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
              * ====================================================
              */
 
-            if (ulRequest & SMPTE_F_READ)
+            if (uRequest & SMPTE_F_READ)
             {
-                ulReply = (uint16_t)g_txTime.frame;
+                uReply = (uint16_t)g_txTime.frame;
 
                 /* Send the reply word back */
                 transaction2.count = 1;
-                transaction2.txBuf = (Ptr)&ulReply;
-                transaction2.rxBuf = (Ptr)&ulDummy;
+                transaction2.txBuf = (Ptr)&uReply;
+                transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
                 GPIO_write(Board_BUSY, PIN_LOW);
@@ -662,9 +658,9 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             }
             else
             {
-                if (ulRequest < 30)
+                if (uData < 30)
                 {
-                    g_txTime.frame = (uint8_t)ulRequest;
+                    g_txTime.frame = (uint8_t)uData;
                 }
             }
             break;
