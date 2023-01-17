@@ -687,6 +687,9 @@ int SMPTE_Encoder_Start(void)
     if (g_encoderEnabled)
         return -1;
 
+    /* Set the starting time members in the SMPTE tx frame buffer */
+    ltc_time_to_frame(&g_txFrame, &g_txTime, LTC_TV_525_60, 0);
+
     /* Setup timer interrupt 2x bit clocks:
      * 24 fps = 3840Hz
      * 25 fps = 4000Hz
@@ -786,7 +789,7 @@ int SMPTE_Encoder_Stop(void)
 }
 
 //*****************************************************************************
-// Reset SMPTE generator start time
+// Reset SMPTE generator starting time values
 //*****************************************************************************
 
 void SMPTE_Encoder_Reset(void)
@@ -808,9 +811,6 @@ void SMPTE_Encoder_Reset(void)
 
     /* Reset the frame buffer */
     ltc_frame_reset(&g_txFrame);
-
-    /* Set the starting time members in the smpte frame */
-    ltc_time_to_frame(&g_txFrame, &g_txTime, LTC_TV_525_60, 0);
 }
 
 //*****************************************************************************
