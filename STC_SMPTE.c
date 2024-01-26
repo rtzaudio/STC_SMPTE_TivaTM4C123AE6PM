@@ -181,8 +181,13 @@ Int main()
     Error_Block eb;
     Task_Params taskParams;
 
+    /* Get the system clock frequency */
     g_systemClock = SysCtlClockGet();
 
+    /* Enable the floating point hardware unit */
+    FPUEnable();
+
+    /* Initialize peripherals for our board hardware */
     Board_initGeneral();
     Board_initGPIO();
     Board_initSPI();
