@@ -173,7 +173,7 @@ void STC_SMPTE_initGeneral(void)
 GPIO_PinConfig gpioPinConfigs[] = {
     /*=== Input pins ===*/
     /* (0) STC_SMPTE_IN */
-    GPIOTiva_PC_4 | GPIO_CFG_INPUT  | GPIO_CFG_IN_INT_BOTH_EDGES,
+    GPIOTiva_PC_4 | GPIO_CFG_INPUT,     //  | GPIO_CFG_IN_INT_BOTH_EDGES,
     /*=== Output pins ===*/
     /* (1) STC_SMPTE_BUSY */
     GPIOTiva_PA_7 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
@@ -205,7 +205,7 @@ GPIO_PinConfig gpioPinConfigs[] = {
  *       reduce memory usage (if placed at end of gpioPinConfigs array).
  */
 GPIO_CallbackFxn gpioCallbackFunctions[] = {
-    //NULL,  /* STC_SMPTE_IN (PC4) */
+    NULL,  /* STC_SMPTE_IN (PC4) */
     NULL
 };
 
