@@ -1022,7 +1022,7 @@ Void Timer0BIntHandler(UArg arg)
     }
     else
     {
-        //g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 16777215) - (uint64_t)g_ui32HighStartCount);
+        g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 16777215) - (uint64_t)g_ui32HighStartCount);
 
         g_ui32HighPeriod = g_ui32HighStartCount - g_ui32HighEndCount;
     }
