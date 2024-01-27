@@ -1027,6 +1027,7 @@ Void Timer0BIntHandler(UArg arg)
     /* Determine the pulse width time in uSec */
     //t /= 80;
 
+#if 0
     if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
     {
         if (g_oneflg == 0)
@@ -1094,6 +1095,7 @@ Void Timer0BIntHandler(UArg arg)
 
         g_bitCount = 0;
     }
+#endif
 }
 
 
