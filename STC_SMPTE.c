@@ -269,6 +269,10 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     /* Reset the SMPTE frame buffer to zeros */
     SMPTE_Encoder_Reset();
 
+    SMPTE_Decoder_Reset();
+
+    SMPTE_Decoder_Start();
+
     /*
      * Enter the main SPI slave processing loop
      */
@@ -929,12 +933,12 @@ int SMPTE_Decoder_Start(void)
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
 
+    /* Configure the GPIO for the Timer peripheral */
+    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5);
+
     /* Configure the GPIO to be CCP pins for the Timer peripheral */
     GPIOPinConfigure(GPIO_PC4_WT0CCP0);
     GPIOPinConfigure(GPIO_PC5_WT0CCP1);
-
-    /* Configure the GPIO for the Timer peripheral */
-    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5);
 
     /* Initialize Timers A and B to both run as periodic up-count edge capture
      * This will split the 32-bit timer into two 16-bit timers.
@@ -943,7 +947,7 @@ int SMPTE_Decoder_Start(void)
                                   TIMER_CFG_B_PERIODIC | TIMER_CFG_B_CAP_TIME_UP));
 
     /* Timer must be loaded with initial count for edge mode */
-    TimerLoadSet(WTIMER0_BASE, TIMER_BOTH, 0xFFFFFFFF);
+    TimerLoadSet(WTIMER0_BASE, TIMER_BOTH, 0x00FFFFFF);
 
     /* Configure Timer A to trigger on a Positive Edge and configure
      * Timer B to trigger on a Negative Edge.
