@@ -1022,7 +1022,9 @@ Void Timer0BIntHandler(UArg arg)
     }
     else
     {
-        g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 0xFFFFFFFFFFFE) - (uint64_t)g_ui32HighStartCount);
+        //g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 0xFFFFFFFFFFFE) - (uint64_t)g_ui32HighStartCount);
+
+        g_ui32HighPeriod = g_ui32HighStartCount - g_ui32HighEndCount;
     }
 
     /* Now look at the period and decide if it's a one or zero */
