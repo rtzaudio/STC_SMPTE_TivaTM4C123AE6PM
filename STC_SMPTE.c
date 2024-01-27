@@ -108,19 +108,6 @@
 
 /* Constants and Macros */
 
-/* pulse width: 416.7us(30fps)
- * 80bit x 30frame/s --> 416.7us/bit
- */
-
-//#define ONE_TIME_MIN    180
-//#define ONE_TIME_MAX    280
-//#define ZERO_TIME_MIN   390
-//#define ZERO_TIME_MAX   540
-
-#define FPS24_REF       521
-#define FPS25_REF       500
-#define FPS30_REF       417
-
 /* Returns the state of a bit number in the frame buffer */
 #define FRAME_BITSTATE(framebuf, bitnum)    ( (((framebuf[bitnum / 8]) >> (bitnum % 8)) & 0x01) )
 
@@ -143,14 +130,20 @@ static LTCFrame g_txFrame;
 static SMPTETimecode g_txTime;
 
 /* SMPTE Decoder variables */
-static bool g_decoderEnabled = false;
-static SMPTETimecode g_rxTime;
 static LTCFrame g_rxFrame;
 static uint8_t* const code = (uint8_t*)&g_rxFrame;
+static SMPTETimecode g_rxTime;
 
+static bool g_decoderEnabled = false;
+
+volatile uint32_t g_ui32HighPeriod;
 volatile uint32_t g_ui32HighStartCount;
 volatile uint32_t g_ui32HighEndCount;
-volatile bool g_bIntFlag = false;
+
+volatile int g_oneflg = 0;
+volatile int g_bitCount = 0;
+volatile int g_drop = 0;
+volatile int g_fps = 0;
 
 /*
  * Function Prototypes
@@ -205,10 +198,9 @@ Int main()
     Hwi_plug(INT_WTIMER0A, Timer0AIntHandler);
     Hwi_plug(INT_WTIMER0B, Timer0BIntHandler);
 
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-
 
     /* Now start the main application button polling task */
 
@@ -927,6 +919,9 @@ int SMPTE_Decoder_Start(void)
     /* Zero out the starting time struct */
     memset(&g_rxTime, 0, sizeof(g_rxTime));
 
+    /* Reset global variables */
+    g_oneflg = g_bitCount = g_drop = g_fps = 0;
+
     /* Reset the frame buffer */
     ltc_frame_reset(&g_rxFrame);
 
@@ -978,90 +973,6 @@ int SMPTE_Decoder_Start(void)
 // SMPTE Input Pin Toggle Interrupt Handler
 //*****************************************************************************
 
-//static int mode;
-static int oneflg = 0;
-static int count = 0;
-static int drop = 0;
-static int fps = 0;
-
-#if 0
-Void Timer0AIntHandler(UArg arg)
-{
-    uint32_t i, b, t;
-
-    GPIO_toggle(Board_STAT_LED);
-
-    /* Clear the timer interrupt flag */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
-
-    /* In Edge Time Mode, the prescaler is used for the most significant bits.
-     * Therefore, it must be shifted by 16 before being added onto the final value.
-     */
-    t = TimerValueGet(WTIMER0_BASE, TIMER_A);
-
-    /* Determine the pulse width time in uSec */
-    //t /= 80;
-
-    if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
-    {
-        if (oneflg == 0)
-        {
-            oneflg = 1;
-            return;
-        }
-        else
-        {
-            oneflg = 0;
-            b = 1;
-        }
-    }
-    else if (t >= ZERO_TIME_MIN && t < ZERO_TIME_MAX)
-    {
-        oneflg = 0;
-        b = 0;
-
-        if (t >= FPS24_REF - 10 && t <= FPS24_REF + 10)
-        {
-            fps = 0;
-        }
-        else if (t >= FPS25_REF - 10 && t <= FPS25_REF + 10)
-        {
-            fps = 1;
-        }
-        else if (t >= FPS30_REF - 10 && t <= FPS30_REF + 10)
-        {
-            fps = drop ? 2 : 3; // 29.97 / 30
-        }
-    }
-    else
-    {
-        oneflg = 0;
-        count = 0;
-        return;
-    }
-
-    for (i=0; i < 9; i ++)
-    {
-        code[i] = (code[i] >> 1) | ((code[i + 1] & 1) ? 0x80 : 0);
-    }
-
-    code[9] = (code[9] >> 1) | (b ? 0x80 : 0);
-
-    count++;
-
-    if ((code[8] == 0xFC) && (code[9] == 0xBF) && (count >= 80))
-    {
-        //parse_code();
-
-        /* Get time members in the smpte frame */
-        ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
-
-        count = 0;
-    }
-}
-#endif
-
-
 Void Timer0AIntHandler(UArg arg)
 {
     // Clear the timer interrupt.
@@ -1076,6 +987,8 @@ Void Timer0AIntHandler(UArg arg)
 
 Void Timer0BIntHandler(UArg arg)
 {
+    uint32_t i, b, t;
+
     // Clear the timer interrupt.
     TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
 
@@ -1085,18 +998,98 @@ Void Timer0BIntHandler(UArg arg)
 
     g_ui32HighEndCount = TimerValueGet(WTIMER0_BASE, TIMER_B);
 
-    // Set the global flag to indicate that new timer values have been stored.
-    // This is only done on Timer B as the measurement is tracking the high
-    // period of the signal, so Timer A handles the rising edge at the start
-    // of the measurement and Timer B handles the falling edge at the end of
-    // the measurement.  Therefore, once Timer B is triggered, the application
-    // can now calculate the high period of the signal.
+    // Simple check to avoid overflow cases.  The End Count is the
+    // second measurement taken and therefore should never be smaller
+    // than the Start Count unless the timer has overflowed.  If that
+    // occurs, then add 2^24-1 to the End Count before subtraction.
 
-    g_bIntFlag = true;
+    if (g_ui32HighEndCount > g_ui32HighStartCount)
+    {
+        g_ui32HighPeriod = g_ui32HighEndCount - g_ui32HighStartCount;
+    }
+    else
+    {
+        g_ui32HighPeriod = (g_ui32HighEndCount + 16777215) - g_ui32HighStartCount;
+    }
+
+    /* Now look at the period and decide if it's a one or zero */
+    t  = g_ui32HighPeriod;
+
+    /* pulse width: 416.7us(30fps)
+     * 80bit x 30frame/s --> 416.7us/bit
+     */
+
+    /* Determine the pulse width time in uSec */
+    //t /= 80;
+
+    if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
+    {
+        if (g_oneflg == 0)
+        {
+            g_oneflg = 1;
+            return;
+        }
+        else
+        {
+            g_oneflg = 0;
+            b = 1;
+        }
+    }
+    else if (t >= ZERO_TIME_MIN && t < ZERO_TIME_MAX)
+    {
+        g_oneflg = 0;
+        b = 0;
+
+        if (t >= FPS24_REF - 10 && t <= FPS24_REF + 10)
+        {
+            g_fps = 0;
+        }
+        else if (t >= FPS25_REF - 10 && t <= FPS25_REF + 10)
+        {
+            g_fps = 1;
+        }
+        else if (t >= FPS30_REF - 10 && t <= FPS30_REF + 10)
+        {
+            g_fps = g_drop ? 2 : 3; // 29.97 / 30
+        }
+    }
+    else
+    {
+        g_oneflg = 0;
+        g_bitCount = 0;
+        return;
+    }
+
+    //code[0] = (code[0] >> 1) | ((code[0+1] & 1) ? 0x80 : 0);
+    //code[1] = (code[1] >> 1) | ((code[1+1] & 1) ? 0x80 : 0);
+    //code[2] = (code[2] >> 1) | ((code[2+1] & 1) ? 0x80 : 0);
+    //code[3] = (code[3] >> 1) | ((code[3+1] & 1) ? 0x80 : 0);
+    //code[4] = (code[4] >> 1) | ((code[4+1] & 1) ? 0x80 : 0);
+    //code[5] = (code[5] >> 1) | ((code[5+1] & 1) ? 0x80 : 0);
+    //code[6] = (code[6] >> 1) | ((code[6+1] & 1) ? 0x80 : 0);
+    //code[7] = (code[7] >> 1) | ((code[7+1] & 1) ? 0x80 : 0);
+    //code[8] = (code[8] >> 1) | ((code[8+1] & 1) ? 0x80 : 0);
+
+    for (i=0; i < 9; i ++)
+    {
+        code[i] = (code[i] >> 1) | ((code[i+1] & 1) ? 0x80 : 0);
+    }
+
+    code[9] = (code[9] >> 1) | (b ? 0x80 : 0);
+
+    g_bitCount++;
+
+    if ((code[8] == 0xFC) && (code[9] == 0xBF) && (g_bitCount >= 80))
+    {
+        /* Parse the buffer and get time members in the SMPTE frame */
+        ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
+
+        /* Toggle the LED on each packet received */
+        GPIO_toggle(Board_STAT_LED);
+
+        g_bitCount = 0;
+    }
 }
-
-
-
 
 
 #if 0

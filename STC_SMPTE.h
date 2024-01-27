@@ -73,6 +73,10 @@
 #define ZERO_TIME_MIN       (700 * 80)    // equals 833 (divide by 8 clock pulses)
 #endif
 
+#define FPS24_REF           521
+#define FPS25_REF           500
+#define FPS30_REF           417
+
 #define END_DATA_POSITION   63
 #define END_SYNC_POSITION   77
 #define END_SMPTE_POSITION  80
