@@ -984,6 +984,7 @@ int SMPTE_Decoder_Start(void)
 // SMPTE Input Pin Toggle Interrupt Handler
 //*****************************************************************************
 
+/* Rising Edge Interrupt */
 Void Timer0AIntHandler(UArg arg)
 {
     // Clear the timer interrupt.
@@ -996,6 +997,7 @@ Void Timer0AIntHandler(UArg arg)
     g_ui32HighStartCount = (TimerValueGet(WTIMER0_BASE, TIMER_A));  // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_A) << 32);
 }
 
+/* Falling Edge Interrupt */
 Void Timer0BIntHandler(UArg arg)
 {
     uint32_t i, b, t;
