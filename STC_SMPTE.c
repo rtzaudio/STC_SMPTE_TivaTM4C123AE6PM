@@ -947,8 +947,14 @@ int SMPTE_Decoder_Start(void)
                                   TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP |
                                   TIMER_CFG_B_PERIODIC | TIMER_CFG_B_CAP_TIME_UP));
 
-    /* Timer must be loaded with initial count for edge mode */
-    TimerLoadSet(WTIMER0_BASE, TIMER_BOTH, 0x00FFFFFF);
+    // To use the timer in Edge Time mode, it must be preloaded with initial
+    // values.  If the prescaler is used, then it must be preloaded as well.
+    // Since we want to use all 24-bits for both timers it will be loaded with
+    // the maximum of 0xFFFF for the 16-bit wide split timers, and 0xFF to add
+    // the additional 8-bits to the split timers with the prescaler.
+
+    TimerLoadSet(WTIMER0_BASE, TIMER_BOTH, 0xFFFFFFFF);
+    TimerPrescaleSet(WTIMER0_BASE, TIMER_BOTH, 0x00);
 
     /* Configure Timer A to trigger on a Positive Edge and configure
      * Timer B to trigger on a Negative Edge.
@@ -987,7 +993,7 @@ Void Timer0AIntHandler(UArg arg)
     // the most significant bits.  Therefore, it must be shifted by 16 before
     // being added onto the final value.
 
-    g_ui32HighStartCount = TimerValueGet(WTIMER0_BASE, TIMER_A);
+    g_ui32HighStartCount = (TimerValueGet(WTIMER0_BASE, TIMER_A));  // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_A) << 32);
 }
 
 Void Timer0BIntHandler(UArg arg)
@@ -1000,8 +1006,8 @@ Void Timer0BIntHandler(UArg arg)
     // Store the end time.  In Edge Time Mode, the prescaler is used for the
     // the most significant bits.  Therefore, it must be shifted by 16 before
     // being added onto the final value.
-
-    g_ui32HighEndCount = TimerValueGet(WTIMER0_BASE, TIMER_B);
+    //
+    g_ui32HighEndCount = (TimerValueGet(WTIMER0_BASE, TIMER_B));    // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_B) << 32);
 
     // Simple check to avoid overflow cases.  The End Count is the
     // second measurement taken and therefore should never be smaller
@@ -1014,7 +1020,7 @@ Void Timer0BIntHandler(UArg arg)
     }
     else
     {
-        g_ui32HighPeriod = (g_ui32HighEndCount + 16777215) - g_ui32HighStartCount;
+        g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 0xFFFFFFFFFFFE) - (uint64_t)g_ui32HighStartCount);
     }
 
     /* Now look at the period and decide if it's a one or zero */
