@@ -1014,7 +1014,7 @@ Void Timer0BIntHandler(UArg arg)
     // Simple check to avoid overflow cases.  The End Count is the
     // second measurement taken and therefore should never be smaller
     // than the Start Count unless the timer has overflowed.  If that
-    // occurs, then add 2^24-1 to the End Count before subtraction.
+    // occurs, then add 2^16-1 to the End Count before subtraction.
 
     if (g_ui32HighEndCount > g_ui32HighStartCount)
     {
@@ -1022,7 +1022,7 @@ Void Timer0BIntHandler(UArg arg)
     }
     else
     {
-        //g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 0xFFFFFFFFFFFE) - (uint64_t)g_ui32HighStartCount);
+        //g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 16777215) - (uint64_t)g_ui32HighStartCount);
 
         g_ui32HighPeriod = g_ui32HighStartCount - g_ui32HighEndCount;
     }
