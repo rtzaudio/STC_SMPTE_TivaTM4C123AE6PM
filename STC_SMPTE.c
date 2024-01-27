@@ -941,9 +941,10 @@ int SMPTE_Decoder_Start(void)
     GPIOPinConfigure(GPIO_PC5_WT0CCP1);
 
     /* Initialize Timers A and B to both run as periodic up-count edge capture
-     * This will split the 32-bit timer into two 16-bit timers.
+     * This will split the 64-bit timer into two 32-bit timers.
      */
-    TimerConfigure(WTIMER0_BASE, (TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP |
+    TimerConfigure(WTIMER0_BASE, (TIMER_CFG_SPLIT_PAIR |
+                                  TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP |
                                   TIMER_CFG_B_PERIODIC | TIMER_CFG_B_CAP_TIME_UP));
 
     /* Timer must be loaded with initial count for edge mode */
