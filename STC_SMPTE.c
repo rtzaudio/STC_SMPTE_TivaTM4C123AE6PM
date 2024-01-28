@@ -195,11 +195,12 @@ Int main()
     Hwi_plug(INT_WTIMER1A, Timer1AIntHandler);
     Hwi_plug(INT_WTIMER1B, Timer1BIntHandler);
 
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
+
     Hwi_plug(INT_WTIMER0A, Timer0AIntHandler);
     Hwi_plug(INT_WTIMER0B, Timer0BIntHandler);
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
 
     /* Now start the main application button polling task */
@@ -891,27 +892,6 @@ Void SMPTE_Decoder_Reset(void)
 }
 
 //*****************************************************************************
-// Stop the SMPTE Decoder
-//*****************************************************************************
-
-int SMPTE_Decoder_Stop(void)
-{
-    /* Disable both Timer A and Timer B */
-    TimerDisable(WTIMER0_BASE, TIMER_BOTH);
-
-    IntDisable(INT_WTIMER0A);
-    IntDisable(INT_WTIMER0B);
-
-    /* Disable the Timer A and B interrupts for Capture Events */
-    TimerIntDisable(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
-
-    /* Clear any interrupts pending */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
-
-    return 0;
-}
-
-//*****************************************************************************
 // Initialize and start the SMPTE decoder edge timer interrupts
 //*****************************************************************************
 
@@ -928,10 +908,6 @@ int SMPTE_Decoder_Start(void)
 
     /* Reset the frame buffer */
     ltc_frame_reset(&g_rxFrame);
-
-    /* Enable the peripherals used by this example */
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
 
     /* Configure the GPIO for the Timer peripheral */
     GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5);
@@ -976,6 +952,27 @@ int SMPTE_Decoder_Start(void)
 
     /* Enable both Timer A and Timer B to begin the application */
     TimerEnable(WTIMER0_BASE, TIMER_BOTH);
+
+    return 0;
+}
+
+//*****************************************************************************
+// Stop the SMPTE Decoder
+//*****************************************************************************
+
+int SMPTE_Decoder_Stop(void)
+{
+    /* Disable both Timer A and Timer B */
+    TimerDisable(WTIMER0_BASE, TIMER_BOTH);
+
+    IntDisable(INT_WTIMER0A);
+    IntDisable(INT_WTIMER0B);
+
+    /* Disable the Timer A and B interrupts for Capture Events */
+    TimerIntDisable(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
+
+    /* Clear any interrupts pending */
+    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
 
     return 0;
 }
