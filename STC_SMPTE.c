@@ -987,6 +987,8 @@ int SMPTE_Decoder_Start(void)
 /* Rising Edge Interrupt */
 Void Timer0AIntHandler(UArg arg)
 {
+    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFF);
+
     // Clear the timer interrupt.
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
 
@@ -1001,6 +1003,8 @@ Void Timer0AIntHandler(UArg arg)
 Void Timer0BIntHandler(UArg arg)
 {
     uint32_t i, b, t;
+
+    TimerLoadSet(WTIMER0_BASE, TIMER_B, 0xFFFFFFFF);
 
     // Clear the timer interrupt.
     TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
