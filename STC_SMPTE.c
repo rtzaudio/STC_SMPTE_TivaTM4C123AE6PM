@@ -106,6 +106,8 @@
 #include "Utils.h"
 #include "libltc\ltc.h"
 
+#define DECODE_TIMER_SIZE       16
+
 /* Constants and Macros */
 
 /* Returns the state of a bit number in the frame buffer */
@@ -117,24 +119,24 @@ uint32_t g_systemClock;
 const char timezone[6] = "+0100";
 
 /* Global Config variables */
-static int  g_frame_rate = 30;
-static bool g_drop_frame = false;
+int  g_frame_rate = 30;
+bool g_drop_frame = false;
 
 /* SMPTE Encoder variables */
-static bool g_encoderEnabled = false;
-static uint8_t  g_txBitState = 0;
-static uint8_t  g_txHalfBit = 0;
-static uint32_t g_txBitCount = 0;
-static uint32_t g_txFrameCount = 0;
-static LTCFrame g_txFrame;
-static SMPTETimecode g_txTime;
+bool g_encoderEnabled = false;
+uint8_t  g_txBitState = 0;
+uint8_t  g_txHalfBit = 0;
+uint32_t g_txBitCount = 0;
+uint32_t g_txFrameCount = 0;
+LTCFrame g_txFrame;
+SMPTETimecode g_txTime;
 
 /* SMPTE Decoder variables */
-static LTCFrame g_rxFrame;
-static uint8_t* const code = (uint8_t*)&g_rxFrame;
-static SMPTETimecode g_rxTime;
 
-static bool g_decoderEnabled = false;
+bool g_decoderEnabled = false;
+LTCFrame g_rxFrame;
+uint8_t* const g_code = (uint8_t*)&g_rxFrame;
+SMPTETimecode g_rxTime;
 
 volatile uint32_t g_ui32HighPeriod;
 volatile uint32_t g_ui32HighStartCount;
@@ -161,10 +163,41 @@ void SMPTE_Decoder_Reset(void);
 
 Void SPI_SlaveTask(UArg a0, UArg a1);
 
-Void Timer1AIntHandler(UArg arg);
-Void Timer1BIntHandler(UArg arg);
-Void Timer0AIntHandler(UArg arg);
-Void Timer0BIntHandler(UArg arg);
+Void WTimer1AIntHandler(UArg arg);
+Void WTimer1BIntHandler(UArg arg);
+Void WTimer0AIntHandler(UArg arg);
+Void WTimer0BIntHandler(UArg arg);
+Void Timer5AIntHandler(UArg arg);
+Void Timer5BIntHandler(UArg arg);
+
+
+#if 0
+void LTC_SMPTE::parse_code()
+{
+    frame = (code[1] & 0x03) * 10 + (code[0] & 0x0f);
+    sec   = (code[3] & 0x07) * 10 + (code[2] & 0x0f);
+    min   = (code[5] & 0x07) * 10 + (code[4] & 0x0f);
+    hour  = (code[7] & 0x03) * 10 + (code[6] & 0x0f);
+    drop  = code[1] & (1<<2) ? 1 : 0;
+    received = 1;
+}
+
+handleInterrupt() {
+  noInterrupts(); // stop being interrupted (got to hurry not to miss the next one)
+  long time = micros(); // record curent time (in micro-seconds)
+  duration = time - lastTime; // Get the duration from the last interrupt
+  ...
+  compare with average lenth of a one (have some margin at least of 1/4 of average - see further)
+  (Calculate 1/4 by bit shifting to be quick).
+  decide if it is a long (0) or a short (1)
+  ...
+  lastTime = time;
+  if is was a one {
+     long average = duration; // average time for a one (short)
+  }
+}
+
+#endif
 
 //*****************************************************************************
 // Main Program Entry Point
@@ -186,22 +219,29 @@ Int main()
     Board_initGPIO();
     Board_initSPI();
 
+    /* WTIMER1 - SMPTE output generator
+     * WTIMER0 - SMPTE input (64-bit timer option pins PC4 & PC5)
+     * TIMER5  - SMPTE input (16-bit timer option pins PG2 & PG3)
+     */
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER5);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
+
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOG);
+
     /* Map the timer interrupt handlers. We don't make sys/bios calls
      * from these interrupt handlers and there is no need to create a
      * context handler with stack swapping for these. These handlers
      * just update some globals variables and need to execute as
      * quickly and efficiently as possible.
      */
-    Hwi_plug(INT_WTIMER1A, Timer1AIntHandler);
-    Hwi_plug(INT_WTIMER1B, Timer1BIntHandler);
-
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
-
-    Hwi_plug(INT_WTIMER0A, Timer0AIntHandler);
-    Hwi_plug(INT_WTIMER0B, Timer0BIntHandler);
-
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
+    Hwi_plug(INT_TIMER5A, Timer5AIntHandler);
+    Hwi_plug(INT_TIMER5B, Timer5BIntHandler);
+    Hwi_plug(INT_WTIMER1A, WTimer1AIntHandler);
+    Hwi_plug(INT_WTIMER1B, WTimer1BIntHandler);
+    Hwi_plug(INT_WTIMER0A, WTimer0AIntHandler);
+    Hwi_plug(INT_WTIMER0B, WTimer0BIntHandler);
 
     /* Now start the main application button polling task */
 
@@ -267,9 +307,8 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
      * Enter the main application button processing loop forever.
      ****************************************************************/
 
-    /* Reset the SMPTE frame buffer to zeros */
+    /* Reset the SMPTE encoder and decoder */
     SMPTE_Encoder_Reset();
-
     SMPTE_Decoder_Reset();
 
     SMPTE_Decoder_Start();
@@ -668,6 +707,31 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 }
 
 //*****************************************************************************
+//********************** SMPTE ENCODER SUPPORT ********************************
+//*****************************************************************************
+
+void SMPTE_Encoder_Reset(void)
+{
+    /* Zero out the starting time struct */
+    memset(&g_txTime, 0, sizeof(g_txTime));
+
+    /* Set default time zone */
+    strcpy(g_txTime.timezone, timezone);
+
+  //g_txTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
+  //g_txTime.months = 1;        /* valid months are 1..12            */
+  //g_txTime.days   = 1;        /* day of month 1..31                */
+
+    g_txTime.hours  = 0;        /* hour 0..23                        */
+    g_txTime.mins   = 0;        /* minute 0..60                      */
+    g_txTime.secs   = 0;        /* second 0..60                      */
+    g_txTime.frame  = 0;        /* sub-second frame 0..(FPS - 1)     */
+
+    /* Reset the frame buffer */
+    ltc_frame_reset(&g_txFrame);
+}
+
+//*****************************************************************************
 // Start the SMPTE Generator
 //*****************************************************************************
 
@@ -778,37 +842,11 @@ int SMPTE_Encoder_Stop(void)
 
     return 1;
 }
-
-//*****************************************************************************
-// Reset SMPTE generator starting time values
-//*****************************************************************************
-
-void SMPTE_Encoder_Reset(void)
-{
-    /* Zero out the starting time struct */
-    memset(&g_txTime, 0, sizeof(g_txTime));
-
-    /* Set default time zone */
-    strcpy(g_txTime.timezone, timezone);
-
-  //g_txTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
-  //g_txTime.months = 1;        /* valid months are 1..12            */
-  //g_txTime.days   = 1;        /* day of month 1..31                */
-
-    g_txTime.hours  = 0;        /* hour 0..23                        */
-    g_txTime.mins   = 0;        /* minute 0..60                      */
-    g_txTime.secs   = 0;        /* second 0..60                      */
-    g_txTime.frame  = 0;        /* sub-second frame 0..(FPS - 1)     */
-
-    /* Reset the frame buffer */
-    ltc_frame_reset(&g_txFrame);
-}
-
 //*****************************************************************************
 // SMPTE Generator WTIMER Interrupt Handler
 //*****************************************************************************
 
-Void Timer1AIntHandler(UArg arg)
+Void WTimer1AIntHandler(UArg arg)
 {
     /* Clear the timer interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
@@ -858,14 +896,14 @@ Void Timer1AIntHandler(UArg arg)
     }
 }
 
-Void Timer1BIntHandler(UArg arg)
+Void WTimer1BIntHandler(UArg arg)
 {
     /* Clear the timer interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMB_TIMEOUT);
 }
 
 //*****************************************************************************
-//** SMPTE DECODER SUPPORT ****************************************************
+//********************** SMPTE DECODER SUPPORT ********************************
 //*****************************************************************************
 
 Void SMPTE_Decoder_Reset(void)
@@ -903,11 +941,16 @@ int SMPTE_Decoder_Start(void)
     /* Zero out the starting time struct */
     memset(&g_rxTime, 0, sizeof(g_rxTime));
 
+    /* Set default time zone */
+    strcpy(g_rxTime.timezone, timezone);
+
     /* Reset global variables */
     g_oneflg = g_bitCount = g_drop = g_fps = 0;
 
     /* Reset the frame buffer */
     ltc_frame_reset(&g_rxFrame);
+
+#if (DECODE_TIMER_SIZE == 32)
 
     /* Configure the GPIO for the Timer peripheral */
     GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5);
@@ -953,6 +996,53 @@ int SMPTE_Decoder_Start(void)
     /* Enable both Timer A and Timer B to begin the application */
     TimerEnable(WTIMER0_BASE, TIMER_BOTH);
 
+#else
+
+    /* Configure the GPIO PG2 and PG3 for the Timer peripheral */
+    GPIOPinTypeTimer(GPIO_PORTG_BASE, GPIO_PIN_2 | GPIO_PIN_3);
+
+    /* Configure the GPIO to be CCP pins for the Timer peripheral */
+    GPIOPinConfigure(GPIO_PG2_T5CCP0);
+    GPIOPinConfigure(GPIO_PG3_T5CCP1);
+
+    /* Initialize Timers A and B to both run as periodic up-count edge capture
+     * This will split the 64-bit timer into two 32-bit timers.
+     */
+    TimerConfigure(TIMER5_BASE, (TIMER_CFG_SPLIT_PAIR |
+                                 TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP |
+                                 TIMER_CFG_B_PERIODIC | TIMER_CFG_B_CAP_TIME_UP));
+
+    /* To use the timer in Edge Time mode, it must be preloaded with initial
+     * values.  If the prescaler is used, then it must be preloaded as well.
+     * Since we want to use all 24-bits for both timers it will be loaded with
+     * the maximum of 0xFFFF for the 16-bit wide split timers, and 0xFF to add
+     * the additional 8-bits to the split timers with the prescaler.
+     */
+    TimerLoadSet(TIMER5_BASE, TIMER_BOTH, 0xFFFF);
+    TimerPrescaleSet(TIMER5_BASE, TIMER_BOTH, 0xFF);
+
+    /* Configure Timer A to trigger on a Positive Edge and configure
+     * Timer B to trigger on a Negative Edge.
+     */
+    TimerControlEvent(TIMER5_BASE, TIMER_A, TIMER_EVENT_POS_EDGE);
+    TimerControlEvent(TIMER5_BASE, TIMER_B, TIMER_EVENT_NEG_EDGE);
+
+    /* Clear the interrupt status flag.  This is done to make sure the
+     * interrupt flag is cleared before we enable it.
+     */
+    TimerIntClear(TIMER5_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
+
+    /* Enable the Timer A and B interrupts for Capture Events */
+    TimerIntEnable(TIMER5_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
+
+    /* Enable the interrupts for Timer A and Timer B on the processor (NVIC) */
+    IntEnable(INT_TIMER5A);
+    IntEnable(INT_TIMER5B);
+
+    /* Enable both Timer A and Timer B to begin the application */
+    TimerEnable(TIMER5_BASE, TIMER_BOTH);
+
+#endif
     return 0;
 }
 
@@ -962,6 +1052,7 @@ int SMPTE_Decoder_Start(void)
 
 int SMPTE_Decoder_Stop(void)
 {
+#if (DECODE_TIMER_SIZE == 32)
     /* Disable both Timer A and Timer B */
     TimerDisable(WTIMER0_BASE, TIMER_BOTH);
 
@@ -973,50 +1064,63 @@ int SMPTE_Decoder_Stop(void)
 
     /* Clear any interrupts pending */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
+#else
+    /* Disable both Timer A and Timer B */
+    TimerDisable(TIMER5_BASE, TIMER_BOTH);
 
+    IntDisable(INT_TIMER5A);
+    IntDisable(INT_TIMER5B);
+
+    /* Disable the Timer A and B interrupts for Capture Events */
+    TimerIntDisable(TIMER5_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
+
+    /* Clear any interrupts pending */
+    TimerIntClear(TIMER5_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
+#endif
     return 0;
 }
 
 //*****************************************************************************
-// SMPTE Input Pin Toggle Interrupt Handler
+// SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
 //*****************************************************************************
 
 /* Rising Edge Interrupt */
-Void Timer0AIntHandler(UArg arg)
+Void WTimer0AIntHandler(UArg arg)
 {
     TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFF);
 
-    // Clear the timer interrupt.
+    /* Clear the timer interrupt */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
 
-    // Store the end time.  In Edge Time Mode, the prescaler is used for the
-    // the most significant bits.  Therefore, it must be shifted by 16 before
-    // being added onto the final value.
-
+    /* Store the end time.  In Edge Time Mode, the prescaler is used for the
+     * the most significant bits.  Therefore, it must be shifted by 16 before
+     * being added onto the final value.
+     */
     g_ui32HighStartCount = (TimerValueGet(WTIMER0_BASE, TIMER_A));  // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_A) << 32);
 }
 
 /* Falling Edge Interrupt */
-Void Timer0BIntHandler(UArg arg)
+Void WTimer0BIntHandler(UArg arg)
 {
+    uint8_t* code;
     uint32_t i, b, t;
 
     TimerLoadSet(WTIMER0_BASE, TIMER_B, 0xFFFFFFFF);
 
-    // Clear the timer interrupt.
+    /* Clear the timer interrupt */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
 
-    // Store the end time.  In Edge Time Mode, the prescaler is used for the
-    // the most significant bits.  Therefore, it must be shifted by 16 before
-    // being added onto the final value.
-    //
+    /* Store the end time.  In Edge Time Mode, the prescaler is used for the
+     * the most significant bits.  Therefore, it must be shifted by 16 before
+     * being added onto the final value.
+     */
     g_ui32HighEndCount = (TimerValueGet(WTIMER0_BASE, TIMER_B));    // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_B) << 32);
 
-    // Simple check to avoid overflow cases.  The End Count is the
-    // second measurement taken and therefore should never be smaller
-    // than the Start Count unless the timer has overflowed.  If that
-    // occurs, then add 2^16-1 to the End Count before subtraction.
-
+    /* Simple check to avoid overflow cases.  The End Count is the
+     * second measurement taken and therefore should never be smaller
+     * than the Start Count unless the timer has overflowed.  If that
+     * occurs, then add 2^16-1 to the End Count before subtraction.
+     */
     if (g_ui32HighEndCount > g_ui32HighStartCount)
     {
         g_ui32HighPeriod = g_ui32HighEndCount - g_ui32HighStartCount;
@@ -1031,14 +1135,14 @@ Void Timer0BIntHandler(UArg arg)
     /* Now look at the period and decide if it's a one or zero */
     t  = g_ui32HighPeriod;
 
-    /* pulse width: 416.7us(30fps)
-     * 80bit x 30frame/s --> 416.7us/bit
+    /* We've interrupted on the falling edge and can now
+     * calculate the pulse width time in microseconds by
+     * dividing t period count by 80.
+     *
+     *  pulse width: 416.7us(30fps)
+     *  0bit x 30frame/s --> 416.7us/bit
      */
 
-    /* Determine the pulse width time in uSec */
-    //t /= 80;
-
-#if 0
     if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
     {
         if (g_oneflg == 0)
@@ -1077,6 +1181,10 @@ Void Timer0BIntHandler(UArg arg)
         return;
     }
 
+    /* Shift the bit into the 80-bit receive buffer */
+
+    code = (uint8_t*)&g_rxFrame;
+
     //code[0] = (code[0] >> 1) | ((code[0+1] & 1) ? 0x80 : 0);
     //code[1] = (code[1] >> 1) | ((code[1+1] & 1) ? 0x80 : 0);
     //code[2] = (code[2] >> 1) | ((code[2+1] & 1) ? 0x80 : 0);
@@ -1086,56 +1194,168 @@ Void Timer0BIntHandler(UArg arg)
     //code[6] = (code[6] >> 1) | ((code[6+1] & 1) ? 0x80 : 0);
     //code[7] = (code[7] >> 1) | ((code[7+1] & 1) ? 0x80 : 0);
     //code[8] = (code[8] >> 1) | ((code[8+1] & 1) ? 0x80 : 0);
+    //code[9] = (code[9] >> 1) | (b ? 0x80 : 0);
 
     for (i=0; i < 9; i ++)
-    {
         code[i] = (code[i] >> 1) | ((code[i+1] & 1) ? 0x80 : 0);
-    }
 
     code[9] = (code[9] >> 1) | (b ? 0x80 : 0);
 
     g_bitCount++;
 
+    /* Must see the SMPTE sync word at the end of frame to consider it a
+     * valid packet. If so, we parse out the frame members into our buffer.
+     */
     if ((code[8] == 0xFC) && (code[9] == 0xBF) && (g_bitCount >= 80))
     {
         /* Parse the buffer and get time members in the SMPTE frame */
-        ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
+        //ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
+
+        g_rxTime.hours = g_rxFrame.hours_units + g_rxFrame.hours_tens * 10;
+        g_rxTime.mins  = g_rxFrame.mins_units  + g_rxFrame.mins_tens * 10;
+        g_rxTime.secs  = g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
+        g_rxTime.frame = g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
 
         /* Toggle the LED on each packet received */
         GPIO_toggle(Board_STAT_LED);
 
+        /* Reset the pulse bit counter */
         g_bitCount = 0;
     }
-#endif
 }
 
+//*****************************************************************************
+// SMPTE Input Edge Timing Interrupts (16-BIT PRE-SCALED IMPLEMENTATION)
+//*****************************************************************************
 
-#if 0
-void LTC_SMPTE::parse_code()
+/* Rising Edge Interrupt */
+Void Timer5AIntHandler(UArg arg)
 {
-    frame = (code[1] & 0x03) * 10 + (code[0] & 0x0f);
-    sec   = (code[3] & 0x07) * 10 + (code[2] & 0x0f);
-    min   = (code[5] & 0x07) * 10 + (code[4] & 0x0f);
-    hour  = (code[7] & 0x03) * 10 + (code[6] & 0x0f);
-    drop  = code[1] & (1<<2) ? 1 : 0;
-    received = 1;
+    /* Clear the timer interrupt */
+    TimerIntClear(TIMER5_BASE, TIMER_CAPA_EVENT);
+
+    /* Store the end time.  In Edge Time Mode, the prescaler is used for the
+     * the most significant bits.  Therefore, it must be shifted by 16 before
+     * being added onto the final value.
+     */
+    g_ui32HighStartCount = (TimerValueGet(TIMER5_BASE, TIMER_A)) +
+                           (TimerPrescaleGet(TIMER5_BASE, TIMER_A) << 16);
 }
 
-handleInterrupt() {
-  noInterrupts(); // stop being interrupted (got to hurry not to miss the next one)
-  long time = micros(); // record curent time (in micro-seconds)
-  duration = time - lastTime; // Get the duration from the last interrupt
-  ...
-  compare with average lenth of a one (have some margin at least of 1/4 of average - see further)
-  (Calculate 1/4 by bit shifting to be quick).
-  decide if it is a long (0) or a short (1)
-  ...
-  lastTime = time;
-  if is was a one {
-     long average = duration; // average time for a one (short)
-  }
-}
+/* Falling Edge Interrupt */
+Void Timer5BIntHandler(UArg arg)
+{
+    uint8_t* code;
+    uint32_t i, b, t;
 
-#endif
+    /* Clear the timer interrupt */
+    TimerIntClear(TIMER5_BASE, TIMER_CAPB_EVENT);
+
+    /* Store the end time.  In Edge Time Mode, the prescaler is used for the
+     * the most significant bits.  Therefore, it must be shifted by 16 before
+     * being added onto the final value.
+     */
+
+    g_ui32HighEndCount = (TimerValueGet(TIMER5_BASE, TIMER_B)) +
+                         (TimerPrescaleGet(TIMER5_BASE, TIMER_B) << 16);
+
+    /* Simple check to avoid overflow cases.  The End Count is the
+     * second measurement taken and therefore should never be smaller
+     * than the Start Count unless the timer has overflowed.  If that
+     * occurs, then add 2^16-1 to the End Count before subtraction.
+     */
+
+    if (g_ui32HighEndCount > g_ui32HighStartCount)
+    {
+        g_ui32HighPeriod = g_ui32HighEndCount - g_ui32HighStartCount;
+    }
+    else
+    {
+        g_ui32HighPeriod = (g_ui32HighEndCount + 16777215) - g_ui32HighStartCount;
+    }
+
+    /* Now look at the high pulse period and determine if it's a one or zero */
+    t  = g_ui32HighPeriod;
+
+    /* We've interrupted on the falling edge and can now
+     * calculate the pulse width time in microseconds by
+     * dividing t period count by 80.
+     *
+     *  pulse width: 416.7us(30fps)
+     *  0bit x 30frame/s --> 416.7us/bit
+     */
+
+    //t /= 80;
+
+    if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
+    {
+        if (g_oneflg == 0)
+        {
+            g_oneflg = 1;
+            return;
+        }
+        else
+        {
+            g_oneflg = 0;
+            b = 1;
+        }
+    }
+    else if (t >= ZERO_TIME_MIN && t < ZERO_TIME_MAX)
+    {
+        g_oneflg = 0;
+        b = 0;
+
+        if (t >= FPS24_REF - 10 && t <= FPS24_REF + 10)
+        {
+            g_fps = 0;
+        }
+        else if (t >= FPS25_REF - 10 && t <= FPS25_REF + 10)
+        {
+            g_fps = 1;
+        }
+        else if (t >= FPS30_REF - 10 && t <= FPS30_REF + 10)
+        {
+            g_fps = g_drop ? 2 : 3; // 29.97 / 30
+        }
+    }
+    else
+    {
+        /* No bit found in valid frame length time */
+        g_oneflg = 0;
+        g_bitCount = 0;
+        return;
+    }
+
+    /* Shift the bit into the 80-bit receive buffer */
+
+    code = (uint8_t*)&g_rxFrame;
+
+    for (i=0; i < 9; i ++)
+        code[i] = (code[i] >> 1) | ((code[i+1] & 1) ? 0x80 : 0);
+
+    code[9] = (code[9] >> 1) | (b ? 0x80 : 0);
+
+    g_bitCount++;
+
+    /* Must see the SMPTE sync word at the end of frame to consider it a
+     * valid packet. If so, we parse out the frame members into our buffer.
+     */
+    if ((code[8] == 0xFC) && (code[9] == 0xBF) && (g_bitCount >= 80))
+    {
+        /* Parse the buffer and get time members in the SMPTE frame */
+        //ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
+
+        g_rxTime.hours = g_rxFrame.hours_units + g_rxFrame.hours_tens * 10;
+        g_rxTime.mins  = g_rxFrame.mins_units  + g_rxFrame.mins_tens * 10;
+        g_rxTime.secs  = g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
+        g_rxTime.frame = g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
+
+        /* Toggle the LED on each packet received */
+        GPIO_toggle(Board_STAT_LED);
+
+        /* Reset the pulse bit counter */
+        g_bitCount = 0;
+    }
+}
 
 /* End-Of-File */

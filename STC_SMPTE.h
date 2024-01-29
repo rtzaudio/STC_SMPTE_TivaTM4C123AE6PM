@@ -60,17 +60,21 @@
 
 #define TIMEOUT_SPI			500		/* Timeout for SPI communications */
 
+/* pulse width: 416.7us(30fps)
+ * 80bit x 30frame/s --> 416.7us/bit
+ */
+
 #ifdef PAL_24FPS
 /* For PAL and 24 FPS */
-#define ONE_TIME_MAX        588     // these values are setup for NTSC video
-#define ONE_TIME_MIN        422     // PAL would be around 1000 for 0 and 500 for 1
-#define ZERO_TIME_MAX       1080    // 80bits times 29.97 frames per sec
-#define ZERO_TIME_MIN       922     // equals 833 (divide by 8 clock pulses)
+#define ONE_TIME_MAX        (588 * 80)  /* these values are setup for NTSC video */
+#define ONE_TIME_MIN        (422 * 80)  /* PAL would be around 1000 for 0 and 500 for 1 */
+#define ZERO_TIME_MAX       (1080 * 80) /* 80bits times 29.97 frames per sec */
+#define ZERO_TIME_MIN       (922 * 80)  /* equals 833 (divide by 8 clock pulses) */
 #else
-#define ONE_TIME_MAX        (475 * 80)     // these values are setup for NTSC video
-#define ONE_TIME_MIN        (300 * 80)    // PAL would be around 1000 for 0 and 500 for 1
-#define ZERO_TIME_MAX       (875 * 80)    // 80bits times 29.97 frames per sec
-#define ZERO_TIME_MIN       (700 * 80)    // equals 833 (divide by 8 clock pulses)
+#define ONE_TIME_MAX        (475 * 80)  /* these values are setup for NTSC video */
+#define ONE_TIME_MIN        (300 * 80)  /* PAL would be around 1000 for 0 and 500 for 1 */
+#define ZERO_TIME_MAX       (875 * 80)  /* 80bits times 29.97 frames per sec */
+#define ZERO_TIME_MIN       (700 * 80)  /* equals 833 (divide by 8 clock pulses) */
 #endif
 
 #define FPS24_REF           521

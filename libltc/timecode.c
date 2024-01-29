@@ -174,7 +174,11 @@ void ltc_frame_to_time(SMPTETimecode *stime, LTCFrame *frame, int flags) {
 		stime->years  = 0;
 		stime->months = 0;
 		stime->days   = 0;
-		sprintf(stime->timezone,"+0000");
+		stime->timezone[0] = '0';
+		stime->timezone[1] = '0';
+        stime->timezone[2] = '0';
+        stime->timezone[3] = '+';
+        stime->timezone[4] = 0;
 	}
 
 	stime->hours = frame->hours_units + frame->hours_tens*10;
