@@ -128,15 +128,15 @@ uint8_t  g_txBitState = 0;
 uint8_t  g_txHalfBit = 0;
 uint32_t g_txBitCount = 0;
 uint32_t g_txFrameCount = 0;
-LTCFrame g_txFrame;
 SMPTETimecode g_txTime;
+LTCFrame g_txFrame;
 
 /* SMPTE Decoder variables */
 
 bool g_decoderEnabled = false;
+SMPTETimecode g_rxTime;
 LTCFrame g_rxFrame;
 uint8_t* const g_code = (uint8_t*)&g_rxFrame;
-SMPTETimecode g_rxTime;
 
 volatile uint32_t g_ui32HighPeriod;
 volatile uint32_t g_ui32HighStartCount;
@@ -795,10 +795,10 @@ int SMPTE_Encoder_Start(void)
     /* SMPTE output pin low initially */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
 
-    /* Set the TIMER1B load value to 1ms */
+    /* Set TIMER_A clock rate */
     TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock/clockrate);
 
-    /* Configure the TIMER1B interrupt for timer timeout */
+    /* Configure the WTIMER1A interrupt for timer timeout */
     TimerIntEnable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
 
     /* Enable the TIMER1B interrupt on the processor (NVIC) */
@@ -969,7 +969,7 @@ int SMPTE_Decoder_Start(void)
     // To use the timer in Edge Time mode, it must be preloaded with initial
     // values.  If the prescaler is used, then it must be preloaded as well.
     // Since we want to use all 24-bits for both timers it will be loaded with
-    // the maximum of 0xFFFF for the 16-bit wide split timers, and 0xFF to add
+    // the maximum of 0xFFFFFF for the 32-bit wide split timers, and 0xFF to add
     // the additional 8-bits to the split timers with the prescaler.
 
     TimerLoadSet(WTIMER0_BASE, TIMER_BOTH, 0xFFFFFFFF);
@@ -1087,7 +1087,7 @@ int SMPTE_Decoder_Stop(void)
 /* Rising Edge Interrupt */
 Void WTimer0AIntHandler(UArg arg)
 {
-    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFF);
+    //TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFF);
 
     /* Clear the timer interrupt */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
@@ -1105,7 +1105,7 @@ Void WTimer0BIntHandler(UArg arg)
     uint8_t* code;
     uint32_t i, b, t;
 
-    TimerLoadSet(WTIMER0_BASE, TIMER_B, 0xFFFFFFFF);
+    //TimerLoadSet(WTIMER0_BASE, TIMER_B, 0xFFFFFFFF);
 
     /* Clear the timer interrupt */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
