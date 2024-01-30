@@ -71,10 +71,15 @@
 #define ZERO_TIME_MAX       (1080 * 80) /* 80bits times 29.97 frames per sec */
 #define ZERO_TIME_MIN       (922 * 80)  /* equals 833 (divide by 8 clock pulses) */
 #else
-#define ONE_TIME_MAX        (475 * 80)  /* these values are setup for NTSC video */
-#define ONE_TIME_MIN        (300 * 80)  /* PAL would be around 1000 for 0 and 500 for 1 */
-#define ZERO_TIME_MAX       (875 * 80)  /* 80bits times 29.97 frames per sec */
-#define ZERO_TIME_MIN       (700 * 80)  /* equals 833 (divide by 8 clock pulses) */
+//#define ONE_TIME_MAX        (475 * 80)  /* these values are setup for NTSC video */
+//#define ONE_TIME_MIN        (300 * 80)  /* PAL would be around 1000 for 0 and 500 for 1 */
+//#define ZERO_TIME_MAX       (875 * 80)  /* 80bits times 29.97 frames per sec */
+//#define ZERO_TIME_MIN       (700 * 80)  /* equals 833 (divide by 8 clock pulses) */
+
+#define ONE_TIME_MAX        (250 * 80)  /* these values are setup for NTSC video */
+#define ONE_TIME_MIN        (150 * 80)  /* PAL would be around 1000 for 0 and 500 for 1 */
+#define ZERO_TIME_MAX       (500 * 80)  /* 80bits times 29.97 frames per sec */
+#define ZERO_TIME_MIN       (375 * 80)  /* equals 833 (divide by 8 clock pulses) */
 #endif
 
 #define FPS24_REF           521

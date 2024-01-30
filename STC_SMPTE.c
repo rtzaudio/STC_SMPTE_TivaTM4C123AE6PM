@@ -106,7 +106,7 @@
 #include "Utils.h"
 #include "libltc\ltc.h"
 
-#define DECODE_TIMER_SIZE       16
+#define DECODE_TIMER_SIZE       32
 
 /* Constants and Macros */
 
@@ -1019,7 +1019,7 @@ int SMPTE_Decoder_Start(void)
      * the additional 8-bits to the split timers with the prescaler.
      */
     TimerLoadSet(TIMER5_BASE, TIMER_BOTH, 0xFFFF);
-    TimerPrescaleSet(TIMER5_BASE, TIMER_BOTH, 0xFF);
+    TimerPrescaleSet(TIMER5_BASE, TIMER_BOTH, 4);
 
     /* Configure Timer A to trigger on a Positive Edge and configure
      * Timer B to trigger on a Negative Edge.
@@ -1135,6 +1135,8 @@ Void WTimer0BIntHandler(UArg arg)
     /* Now look at the period and decide if it's a one or zero */
     t  = g_ui32HighPeriod;
 
+    //t /= 80;
+
     /* We've interrupted on the falling edge and can now
      * calculate the pulse width time in microseconds by
      * dividing t period count by 80.
@@ -1231,6 +1233,8 @@ Void WTimer0BIntHandler(UArg arg)
 /* Rising Edge Interrupt */
 Void Timer5AIntHandler(UArg arg)
 {
+    TimerLoadSet(TIMER5_BASE, TIMER_A, 0xFFFF);
+
     /* Clear the timer interrupt */
     TimerIntClear(TIMER5_BASE, TIMER_CAPA_EVENT);
 
@@ -1247,6 +1251,8 @@ Void Timer5BIntHandler(UArg arg)
 {
     uint8_t* code;
     uint32_t i, b, t;
+
+    TimerLoadSet(TIMER5_BASE, TIMER_B, 0xFFFF);
 
     /* Clear the timer interrupt */
     TimerIntClear(TIMER5_BASE, TIMER_CAPB_EVENT);
@@ -1272,11 +1278,14 @@ Void Timer5BIntHandler(UArg arg)
     else
     {
         g_ui32HighPeriod = (g_ui32HighEndCount + 16777215) - g_ui32HighStartCount;
+
+        g_ui32HighPeriod = g_ui32HighStartCount - g_ui32HighEndCount;
     }
 
     /* Now look at the high pulse period and determine if it's a one or zero */
     t  = g_ui32HighPeriod;
 
+#if 0
     /* We've interrupted on the falling edge and can now
      * calculate the pulse width time in microseconds by
      * dividing t period count by 80.
@@ -1356,6 +1365,7 @@ Void Timer5BIntHandler(UArg arg)
         /* Reset the pulse bit counter */
         g_bitCount = 0;
     }
+#endif
 }
 
 /* End-Of-File */
