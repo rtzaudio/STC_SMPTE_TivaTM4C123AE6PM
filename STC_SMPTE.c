@@ -966,12 +966,12 @@ int SMPTE_Decoder_Start(void)
                                   TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP |
                                   TIMER_CFG_B_PERIODIC | TIMER_CFG_B_CAP_TIME_UP));
 
-    // To use the timer in Edge Time mode, it must be preloaded with initial
-    // values.  If the prescaler is used, then it must be preloaded as well.
-    // Since we want to use all 24-bits for both timers it will be loaded with
-    // the maximum of 0xFFFFFF for the 32-bit wide split timers, and 0xFF to add
-    // the additional 8-bits to the split timers with the prescaler.
-
+    /* To use the wide timer in edge time mode, it must be preloaded with initial
+     * values. If the prescaler is used, then it must be preloaded as well.
+     * Since we want to use all 48-bits for both timers it will be loaded with
+     * the maximum of 0xFFFFFFFF for the 32-bit wide split timers, and 0xFF to add
+     * the additional 8-bits to the split timers with the prescaler.
+     */
     TimerLoadSet(WTIMER0_BASE, TIMER_BOTH, 0xFFFFFFFF);
     TimerPrescaleSet(WTIMER0_BASE, TIMER_BOTH, 0x00);
 
