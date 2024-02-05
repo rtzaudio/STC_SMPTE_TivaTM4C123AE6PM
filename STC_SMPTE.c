@@ -146,6 +146,30 @@ volatile int g_bitCount = 0;
 volatile int g_drop = 0;
 volatile int g_fps = 0;
 
+
+const int max_diff = 15; //us
+const int expected_duration_single = 208;   //us
+const int expected_duration_double = 208 * 2;
+
+volatile bool first_transition;
+
+volatile bool new_bit_available = false;
+volatile int new_bit = 0;
+
+//the sync word is available in bit 64 - 79,
+//see https://en.wikipedia.org/wiki/Linear_timecode
+const uint64_t sync_word = 0b0011111111111101;
+const uint64_t sync_mask = 0b1111111111111111;
+
+uint64_t bit_string = 0;
+
+//elapsedMicros since_sync_found;
+//elapsedMicros since_sec_pulse;
+
+smpte_timecode_data current_frame_info;
+
+int bit_index = 0;
+
 /*
  * Function Prototypes
  */
@@ -1132,6 +1156,68 @@ Void WTimer0BIntHandler(UArg arg)
         g_bitCount = 0;
     }
 }
+
+void ltc_transition_detected(){
+  int micros_since =  micros_elapsed_since_transition;
+  if(abs( micros_since - expected_duration_single) < max_diff){
+    if(first_transition){
+      first_transition = false;
+    }else{
+      //second transition
+      first_transition = true;
+      new_bit = 1;
+      new_bit_available = true;
+    }
+  }else if(abs(micros_since - expected_duration_double) < max_diff){
+    first_transition = true;
+    new_bit = 0;
+    new_bit_available = true;
+  }else{
+    //first bit change? or something is wrong!
+  }
+  //micros_elapsed_since_transition=0;
+}
+
+void decode_ltc(int new_bit){
+
+  // Shift one bit
+  bit_string = (bit_string << 1);
+  //a bit shift adds a zero, if a 1 is needed add 1
+  if(new_bit == 1) bit_string |= 1;
+
+  //if the current_word matches the sync word
+  if( (bit_string & sync_mask) == sync_word){
+
+    bit_string = 0;
+    since_sync_found = 0;
+    bit_index = -1;//bit 79
+
+    //a full frame has passed
+    ltc_frame_complete();
+
+  } else if(since_sync_found<33333){
+    //bit index in LTC message
+    bit_index++;
+
+    //info above bit 60 is ignored.
+    if(bit_index == 60){
+
+      //bit string length = index + 1 = 61
+      uint64_t reversed_bit_string = reverse_bit_order(bit_string,61);
+
+      //see https://en.wikipedia.org/wiki/Linear_timecode
+
+      //This decodes only time info, user fields are ignored
+      current_frame_info.frames  = decode_part(reversed_bit_string,0,3)   + 10 * decode_part(reversed_bit_string,8,9);
+      current_frame_info.seconds = decode_part(reversed_bit_string,16,19) + 10 * decode_part(reversed_bit_string,24,26);
+      current_frame_info.minutes = decode_part(reversed_bit_string,32,35) + 10 * decode_part(reversed_bit_string,40,42);
+      current_frame_info.hours   = decode_part(reversed_bit_string,48,51) + 10 * decode_part(reversed_bit_string,56,57);
+
+      bit_string = 0;
+    }
+  }
+}
+
 
 #if 0
 void LTC_SMPTE::parse_code()
