@@ -147,13 +147,16 @@ volatile int g_drop = 0;
 volatile int g_fps = 0;
 
 
+/* Normal frame rate timing */
+#define MAX_DIFF                    15
+#define EXPECTED_DURATION_SINGLE    208
+#define EXPECTED_DURATION_DOUBLE    (EXPECTED_DURATION_SINGLE * 2)
+
 const int max_diff = 15; //us
-const int expected_duration_single = 208;   //us
-const int expected_duration_double = 208 * 2;
+const int expected_duration_single = (208 * 80);       // duration in us
+const int expected_duration_double = ((208 * 80) * 2);
 
-volatile bool first_transition;
-
-volatile bool new_bit_available = false;
+volatile bool first_transition = false;
 volatile int new_bit = 0;
 
 //the sync word is available in bit 64 - 79,
@@ -162,12 +165,6 @@ const uint64_t sync_word = 0b0011111111111101;
 const uint64_t sync_mask = 0b1111111111111111;
 
 uint64_t bit_string = 0;
-
-//elapsedMicros since_sync_found;
-//elapsedMicros since_sec_pulse;
-
-smpte_timecode_data current_frame_info;
-
 int bit_index = 0;
 
 /*
@@ -934,6 +931,9 @@ int SMPTE_Decoder_Start(void)
     /* Reset global variables */
     g_oneflg = g_bitCount = g_drop = g_fps = 0;
 
+    first_transition = false;
+    new_bit = 0;
+
     /* Reset the frame buffer */
     ltc_frame_reset(&g_rxFrame);
 
@@ -1012,8 +1012,6 @@ int SMPTE_Decoder_Stop(void)
 /* Rising Edge Interrupt */
 Void WTimer0AIntHandler(UArg arg)
 {
-    //TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFF);
-
     /* Clear the timer interrupt */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
 
@@ -1021,16 +1019,15 @@ Void WTimer0AIntHandler(UArg arg)
      * the most significant bits.  Therefore, it must be shifted by 16 before
      * being added onto the final value.
      */
-    g_ui32HighStartCount = (TimerValueGet(WTIMER0_BASE, TIMER_A));  // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_A) << 32);
+    g_ui32HighStartCount = TimerValueGet(WTIMER0_BASE, TIMER_A);  // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_A) << 32);
 }
 
 /* Falling Edge Interrupt */
 Void WTimer0BIntHandler(UArg arg)
 {
     uint8_t* code;
-    uint32_t i, b, t;
-
-    //TimerLoadSet(WTIMER0_BASE, TIMER_B, 0xFFFFFFFF);
+    uint32_t i, t;
+    bool new_bit_available = false;
 
     /* Clear the timer interrupt */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
@@ -1039,7 +1036,7 @@ Void WTimer0BIntHandler(UArg arg)
      * the most significant bits.  Therefore, it must be shifted by 16 before
      * being added onto the final value.
      */
-    g_ui32HighEndCount = (TimerValueGet(WTIMER0_BASE, TIMER_B));    // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_B) << 32);
+    g_ui32HighEndCount = TimerValueGet(WTIMER0_BASE, TIMER_B);    // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_B) << 32);
 
     /* Simple check to avoid overflow cases.  The End Count is the
      * second measurement taken and therefore should never be smaller
@@ -1052,8 +1049,7 @@ Void WTimer0BIntHandler(UArg arg)
     }
     else
     {
-        g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 16777215) - (uint64_t)g_ui32HighStartCount);
-
+        //g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 16777215) - (uint64_t)g_ui32HighStartCount);
         g_ui32HighPeriod = g_ui32HighStartCount - g_ui32HighEndCount;
     }
 
@@ -1069,93 +1065,88 @@ Void WTimer0BIntHandler(UArg arg)
      */
 
     /* Calculate the high period avg we need scale against */
-    g_ui32PeriodAvg = (g_ui32HighPeriod >> 1);
+    g_ui32PeriodAvg = (g_ui32HighPeriod >> 2);
 
     /* Now look at the period and decide if it's a one or zero */
     t  = g_ui32HighPeriod;
 
     //t /= 80;
 
-    if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
+    if (abs((int)t - expected_duration_single) < max_diff)
     {
-        if (g_oneflg == 0)
+        if (first_transition)
         {
-            g_oneflg = 1;
-            return;
+            /* First bit transition */
+            first_transition = false;
         }
         else
         {
-            g_oneflg = 0;
-            b = 1;
+            // Second bit transition
+            new_bit = 1;
+            new_bit_available = true;
+            first_transition = true;
         }
     }
-    else if (t >= ZERO_TIME_MIN && t < ZERO_TIME_MAX)
+    else if (abs(t - expected_duration_double) < max_diff)
     {
-        g_oneflg = 0;
-        b = 0;
-
-        if (t >= FPS24_REF - 10 && t <= FPS24_REF + 10)
-        {
-            g_fps = 0;
-        }
-        else if (t >= FPS25_REF - 10 && t <= FPS25_REF + 10)
-        {
-            g_fps = 1;
-        }
-        else if (t >= FPS30_REF - 10 && t <= FPS30_REF + 10)
-        {
-            g_fps = g_drop ? 2 : 3; // 29.97 / 30
-        }
+        new_bit = 0;
+        new_bit_available = true;
+        first_transition = true;
     }
     else
     {
-        g_oneflg = 0;
-        g_bitCount = 0;
-        return;
+        //first bit change? or something is wrong!
     }
 
-    /* Shift the bit into the 80-bit receive buffer */
-
-    code = (uint8_t*)&g_rxFrame;
-
-    //code[0] = (code[0] >> 1) | ((code[0+1] & 1) ? 0x80 : 0);
-    //code[1] = (code[1] >> 1) | ((code[1+1] & 1) ? 0x80 : 0);
-    //code[2] = (code[2] >> 1) | ((code[2+1] & 1) ? 0x80 : 0);
-    //code[3] = (code[3] >> 1) | ((code[3+1] & 1) ? 0x80 : 0);
-    //code[4] = (code[4] >> 1) | ((code[4+1] & 1) ? 0x80 : 0);
-    //code[5] = (code[5] >> 1) | ((code[5+1] & 1) ? 0x80 : 0);
-    //code[6] = (code[6] >> 1) | ((code[6+1] & 1) ? 0x80 : 0);
-    //code[7] = (code[7] >> 1) | ((code[7+1] & 1) ? 0x80 : 0);
-    //code[8] = (code[8] >> 1) | ((code[8+1] & 1) ? 0x80 : 0);
-    //code[9] = (code[9] >> 1) | (b ? 0x80 : 0);
-
-    for (i=0; i < 9; i ++)
-        code[i] = (code[i] >> 1) | ((code[i+1] & 1) ? 0x80 : 0);
-
-    code[9] = (code[9] >> 1) | (b ? 0x80 : 0);
-
-    g_bitCount++;
-
-    /* Must see the SMPTE sync word at the end of frame to consider it a
-     * valid packet. If so, we parse out the frame members into our buffer.
-     */
-    if ((code[8] == 0xFC) && (code[9] == 0xBF) && (g_bitCount >= 80))
+    if (new_bit_available)
     {
-        /* Parse the buffer and get time members in the SMPTE frame */
-        //ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
+        /* Shift the bit into the 80-bit receive buffer */
 
-        g_rxTime.hours = g_rxFrame.hours_units + g_rxFrame.hours_tens * 10;
-        g_rxTime.mins  = g_rxFrame.mins_units  + g_rxFrame.mins_tens * 10;
-        g_rxTime.secs  = g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
-        g_rxTime.frame = g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
+        code = (uint8_t*)&g_rxFrame;
 
-        /* Toggle the LED on each packet received */
-        GPIO_toggle(Board_STAT_LED);
+        //code[0] = (code[0] >> 1) | ((code[0+1] & 1) ? 0x80 : 0);
+        //code[1] = (code[1] >> 1) | ((code[1+1] & 1) ? 0x80 : 0);
+        //code[2] = (code[2] >> 1) | ((code[2+1] & 1) ? 0x80 : 0);
+        //code[3] = (code[3] >> 1) | ((code[3+1] & 1) ? 0x80 : 0);
+        //code[4] = (code[4] >> 1) | ((code[4+1] & 1) ? 0x80 : 0);
+        //code[5] = (code[5] >> 1) | ((code[5+1] & 1) ? 0x80 : 0);
+        //code[6] = (code[6] >> 1) | ((code[6+1] & 1) ? 0x80 : 0);
+        //code[7] = (code[7] >> 1) | ((code[7+1] & 1) ? 0x80 : 0);
+        //code[8] = (code[8] >> 1) | ((code[8+1] & 1) ? 0x80 : 0);
+        //code[9] = (code[9] >> 1) | (b ? 0x80 : 0);
 
-        /* Reset the pulse bit counter */
-        g_bitCount = 0;
+        for (i=0; i < 9; i ++)
+            code[i] = (code[i] >> 1) | ((code[i+1] & 1) ? 0x80 : 0);
+
+        code[9] = (code[9] >> 1) | (new_bit ? 0x80 : 0);
+
+        g_bitCount++;
+
+        /* Must see the SMPTE sync word at the end of frame to consider it a
+         * valid packet. If so, we parse out the frame members into our buffer.
+         */
+        if ((code[8] == 0xFC) && (code[9] == 0xBF) && (g_bitCount >= 80))
+        {
+            /* Parse the buffer and get time members in the SMPTE frame */
+            //ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
+
+            g_rxTime.hours = g_rxFrame.hours_units + g_rxFrame.hours_tens * 10;
+            g_rxTime.mins  = g_rxFrame.mins_units  + g_rxFrame.mins_tens * 10;
+            g_rxTime.secs  = g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
+            g_rxTime.frame = g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
+
+            /* Toggle the LED on each packet received */
+            GPIO_toggle(Board_STAT_LED);
+
+            /* Reset the pulse bit counter */
+            g_bitCount = 0;
+        }
     }
 }
+
+
+
+#if 0
 
 void ltc_transition_detected(){
   int micros_since =  micros_elapsed_since_transition;
@@ -1218,8 +1209,45 @@ void decode_ltc(int new_bit){
   }
 }
 
+if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
+{
+    if (g_oneflg == 0)
+    {
+        g_oneflg = 1;
+        return;
+    }
+    else
+    {
+        g_oneflg = 0;
+        b = 1;
+    }
+}
+else if (t >= ZERO_TIME_MIN && t < ZERO_TIME_MAX)
+{
+    g_oneflg = 0;
+    b = 0;
 
-#if 0
+    if (t >= FPS24_REF - 10 && t <= FPS24_REF + 10)
+    {
+        g_fps = 0;
+    }
+    else if (t >= FPS25_REF - 10 && t <= FPS25_REF + 10)
+    {
+        g_fps = 1;
+    }
+    else if (t >= FPS30_REF - 10 && t <= FPS30_REF + 10)
+    {
+        g_fps = g_drop ? 2 : 3; // 29.97 / 30
+    }
+}
+else
+{
+    g_oneflg = 0;
+    g_bitCount = 0;
+    return;
+}
+
+
 void LTC_SMPTE::parse_code()
 {
     frame = (code[1] & 0x03) * 10 + (code[0] & 0x0f);
