@@ -146,16 +146,6 @@ volatile int g_bitCount = 0;
 volatile int g_drop = 0;
 volatile int g_fps = 0;
 
-
-/* Normal frame rate timing */
-#define MAX_DIFF                    15
-#define EXPECTED_DURATION_SINGLE    208
-#define EXPECTED_DURATION_DOUBLE    (EXPECTED_DURATION_SINGLE * 2)
-
-const int max_diff = 15; //us
-const int expected_duration_single = (208 * 80);       // duration in us
-const int expected_duration_double = ((208 * 80) * 2);
-
 volatile bool first_transition = false;
 volatile int new_bit = 0;
 
@@ -1009,7 +999,7 @@ int SMPTE_Decoder_Stop(void)
 // SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
 //*****************************************************************************
 
-/* Rising Edge Interrupt */
+/* Rising Edge Interrupt (start of a pulse) */
 Void WTimer0AIntHandler(UArg arg)
 {
     /* Clear the timer interrupt */
@@ -1022,7 +1012,7 @@ Void WTimer0AIntHandler(UArg arg)
     g_ui32HighStartCount = TimerValueGet(WTIMER0_BASE, TIMER_A);  // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_A) << 32);
 }
 
-/* Falling Edge Interrupt */
+/* Falling Edge Interrupt (end of pulse) */
 Void WTimer0BIntHandler(UArg arg)
 {
     uint8_t* code;
@@ -1067,12 +1057,14 @@ Void WTimer0BIntHandler(UArg arg)
     /* Calculate the high period avg we need scale against */
     g_ui32PeriodAvg = (g_ui32HighPeriod >> 2);
 
-    /* Now look at the period and decide if it's a one or zero */
+    /* Normally we'd divide the period count by 80 here to get the pulse
+     * time in microseconds. However, we scale all the other timing
+     * constants by 80 instead to avoid any divison here.
+     */
     t  = g_ui32HighPeriod;
 
-    //t /= 80;
-
-    if (abs((int)t - expected_duration_single) < max_diff)
+    /* Now look at the period and decide if it's a one or zero */
+    if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
     {
         if (first_transition)
         {
@@ -1087,7 +1079,7 @@ Void WTimer0BIntHandler(UArg arg)
             first_transition = true;
         }
     }
-    else if (abs(t - expected_duration_double) < max_diff)
+    else if (t >= ZERO_TIME_MIN && t < ZERO_TIME_MAX)
     {
         new_bit = 0;
         new_bit_available = true;

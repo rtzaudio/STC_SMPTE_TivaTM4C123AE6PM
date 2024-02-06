@@ -64,6 +64,11 @@
  * 80bit x 30frame/s --> 416.7us/bit
  */
 
+/* pulse times in microseconds */
+#define MAX_DIFF                    15
+#define EXPECTED_DURATION_SINGLE    208
+#define EXPECTED_DURATION_DOUBLE    (EXPECTED_DURATION_SINGLE * 2)
+
 #ifdef PAL_24FPS
 /* For PAL and 24 FPS */
 #define ONE_TIME_MAX        (588 * 80)  /* these values are setup for NTSC video */
@@ -71,15 +76,11 @@
 #define ZERO_TIME_MAX       (1080 * 80) /* 80bits times 29.97 frames per sec */
 #define ZERO_TIME_MIN       (922 * 80)  /* equals 833 (divide by 8 clock pulses) */
 #else
-//#define ONE_TIME_MAX        (475 * 80)  /* these values are setup for NTSC video */
-//#define ONE_TIME_MIN        (300 * 80)  /* PAL would be around 1000 for 0 and 500 for 1 */
-//#define ZERO_TIME_MAX       (875 * 80)  /* 80bits times 29.97 frames per sec */
-//#define ZERO_TIME_MIN       (700 * 80)  /* equals 833 (divide by 8 clock pulses) */
-
-#define ONE_TIME_MAX        (250 * 80)  /* these values are setup for NTSC video */
-#define ONE_TIME_MIN        (150 * 80)  /* PAL would be around 1000 for 0 and 500 for 1 */
-#define ZERO_TIME_MAX       (500 * 80)  /* 80bits times 29.97 frames per sec */
-#define ZERO_TIME_MIN       (375 * 80)  /* equals 833 (divide by 8 clock pulses) */
+/* these values are setup for NTSC video */
+#define ONE_TIME_MAX        ((EXPECTED_DURATION_SINGLE + MAX_DIFF) * 80)
+#define ONE_TIME_MIN        ((EXPECTED_DURATION_SINGLE - MAX_DIFF) * 80)
+#define ZERO_TIME_MAX       ((EXPECTED_DURATION_DOUBLE + MAX_DIFF) * 80)
+#define ZERO_TIME_MIN       ((EXPECTED_DURATION_DOUBLE - MAX_DIFF) * 80)
 #endif
 
 #define FPS24_REF           521
