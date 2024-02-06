@@ -157,6 +157,11 @@ const uint64_t sync_mask = 0b1111111111111111;
 uint64_t bit_string = 0;
 int bit_index = 0;
 
+typedef struct LTC_FRAME_BITS_T {
+    uint64_t    data;
+    uint16_t    sync;
+} LTC_FRAME_BITS;
+
 /*
  * Function Prototypes
  */
@@ -1093,6 +1098,10 @@ Void WTimer0BIntHandler(UArg arg)
     if (new_bit_available)
     {
         /* Shift the bit into the 80-bit receive buffer */
+        //LTC_FRAME_BITS* p = (LTC_FRAME_BITS*)&g_rxFrame;
+        //uint64_t d;
+        //d = *p->data;
+        //if (d & 0x8000000000000000)
 
         code = (uint8_t*)&g_rxFrame;
 
@@ -1117,7 +1126,10 @@ Void WTimer0BIntHandler(UArg arg)
         /* Must see the SMPTE sync word at the end of frame to consider it a
          * valid packet. If so, we parse out the frame members into our buffer.
          */
-        if ((code[8] == 0xFC) && (code[9] == 0xBF) && (g_bitCount >= 80))
+
+        //if ((code[8] == 0xFC) && (code[9] == 0xBF) && (g_bitCount >= 80))
+
+        if (g_rxFrame.sync_word == sync_word)
         {
             /* Parse the buffer and get time members in the SMPTE frame */
             //ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
