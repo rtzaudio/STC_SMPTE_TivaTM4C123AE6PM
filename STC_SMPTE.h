@@ -65,7 +65,7 @@
  */
 
 /* pulse times in microseconds */
-#define MAX_DIFF                    15
+#define MAX_DELTA                   15
 #define EXPECTED_DURATION_SINGLE    208
 #define EXPECTED_DURATION_DOUBLE    (EXPECTED_DURATION_SINGLE * 2)
 
@@ -77,19 +77,15 @@
 #define ZERO_TIME_MIN       (922 * 80)  /* equals 833 (divide by 8 clock pulses) */
 #else
 /* these values are setup for NTSC video */
-#define ONE_TIME_MAX        ((EXPECTED_DURATION_SINGLE + MAX_DIFF) * 80)
-#define ONE_TIME_MIN        ((EXPECTED_DURATION_SINGLE - MAX_DIFF) * 80)
-#define ZERO_TIME_MAX       ((EXPECTED_DURATION_DOUBLE + MAX_DIFF) * 80)
-#define ZERO_TIME_MIN       ((EXPECTED_DURATION_DOUBLE - MAX_DIFF) * 80)
+#define ONE_TIME_MAX        ((EXPECTED_DURATION_SINGLE + MAX_DELTA) * 80)
+#define ONE_TIME_MIN        ((EXPECTED_DURATION_SINGLE - MAX_DELTA) * 80)
+#define ZERO_TIME_MAX       ((EXPECTED_DURATION_DOUBLE + MAX_DELTA) * 80)
+#define ZERO_TIME_MIN       ((EXPECTED_DURATION_DOUBLE - MAX_DELTA) * 80)
 #endif
 
 #define FPS24_REF           521
 #define FPS25_REF           500
 #define FPS30_REF           417
-
-#define END_DATA_POSITION   63
-#define END_SYNC_POSITION   77
-#define END_SMPTE_POSITION  80
 
 /*** System Structures *****************************************************/
 
