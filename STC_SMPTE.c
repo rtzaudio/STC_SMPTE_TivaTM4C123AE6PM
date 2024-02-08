@@ -201,6 +201,9 @@ Int main()
     Board_initGPIO();
     Board_initSPI();
 
+    /* Turn the LED on */
+    GPIO_write(Board_STAT_LED, Board_LED_ON);
+
     /* WTIMER1 - SMPTE output generator
      * WTIMER0 - SMPTE input (64-bit timer option pins PC4 & PC5)
      */
@@ -719,6 +722,9 @@ int SMPTE_Encoder_Start(void)
     if (g_encoderEnabled)
         return -1;
 
+    /* Turn the LED on to indicate active */
+    GPIO_write(Board_STAT_LED, Board_LED_ON);
+
     /* Set the starting time members in the SMPTE tx frame buffer */
     ltc_time_to_frame(&g_txFrame, &g_txTime, LTC_TV_525_60, 0);
 
@@ -766,9 +772,6 @@ int SMPTE_Encoder_Start(void)
     GPIO_write(Board_RELAY, Board_RELAY_ON);
     Task_sleep(50);
 
-    /* Turn the LED on to indicate active */
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-
     /* SMPTE output pin low initially */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
 
@@ -811,9 +814,9 @@ int SMPTE_Encoder_Stop(void)
     /* SMPTE output pin low */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
 
-    /* Relay and LED off */
+    /* Relay off */
     GPIO_write(Board_RELAY, Board_RELAY_OFF);
-    GPIO_write(Board_STAT_LED, Board_LED_OFF);
+    GPIO_write(Board_STAT_LED, Board_LED_ON);
 
     g_encoderEnabled = false;
 
@@ -859,6 +862,9 @@ Void WTimer1AIntHandler(UArg arg)
 
             /* Reset frame bit counter */
             g_txBitCount = 0;
+
+            /* Toggle the LED on each packet received */
+            GPIO_toggle(Board_STAT_LED);
         }
 
         /* Pre-load the state of the next bit to go out */
@@ -866,10 +872,6 @@ Void WTimer1AIntHandler(UArg arg)
 
         /* Increment the frame bit counter */
         ++g_txBitCount;
-
-        /* Toggle the status LED on high bits */
-        //if (g_txBitState)
-        //    GPIO_toggle(Board_STAT_LED);
     }
 }
 
@@ -912,6 +914,9 @@ Void SMPTE_Decoder_Reset(void)
 
 int SMPTE_Decoder_Start(void)
 {
+    /* Status LED on */
+    GPIO_write(Board_STAT_LED, Board_LED_ON);
+
     /* Make sure the decoder interrupt isn't enabled */
     SMPTE_Decoder_Stop();
 
@@ -974,6 +979,9 @@ int SMPTE_Decoder_Start(void)
     /* Enable both Timer A and Timer B to begin the application */
     TimerEnable(WTIMER0_BASE, TIMER_BOTH);
 
+    /* SMPTE input mute off */
+    GPIO_write(Board_SMPTE_MUTE, PIN_HIGH);
+
     return 0;
 }
 
@@ -983,6 +991,12 @@ int SMPTE_Decoder_Start(void)
 
 int SMPTE_Decoder_Stop(void)
 {
+    /* Status LED */
+    GPIO_write(Board_STAT_LED, Board_LED_ON);
+
+    /* SMPTE input mute on */
+    GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
+
     /* Disable both Timer A and Timer B */
     TimerDisable(WTIMER0_BASE, TIMER_BOTH);
 
