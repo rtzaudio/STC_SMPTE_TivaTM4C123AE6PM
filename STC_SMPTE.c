@@ -917,6 +917,9 @@ int SMPTE_Decoder_Start(void)
     /* Status LED on */
     GPIO_write(Board_STAT_LED, Board_LED_ON);
 
+    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
+
+
     /* Make sure the decoder interrupt isn't enabled */
     SMPTE_Decoder_Stop();
 
@@ -1019,6 +1022,8 @@ int SMPTE_Decoder_Stop(void)
 /* Rising Edge Interrupt (Start of Pulse) */
 Void WTimer0AIntHandler(UArg arg)
 {
+    GPIO_write(Board_FRAME_SYNC, PIN_HIGH);
+
     /* Clear the timer interrupt */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
 
@@ -1032,6 +1037,8 @@ Void WTimer0AIntHandler(UArg arg)
 /* Falling Edge Interrupt (End of Pulse) */
 Void WTimer0BIntHandler(UArg arg)
 {
+    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
+
     uint32_t t;
     bool new_bit_available = false;
 
