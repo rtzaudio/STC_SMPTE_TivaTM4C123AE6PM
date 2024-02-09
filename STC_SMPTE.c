@@ -103,83 +103,23 @@
 #include "Board.h"
 #include "STC_SMPTE.h"
 #include "STC_SMPTE_SPI.h"
-#include "Utils.h"
 #include "libltc\ltc.h"
 
 /* Constants and Macros */
 
 /* Returns the state of a bit number in the frame buffer */
-#define FRAME_BITSTATE(framebuf, bitnum)    ( (((framebuf[bitnum / 8]) >> (bitnum % 8)) & 0x01) )
+#define FRAME_GETBIT(b, n)    ( (((b[n / 8]) >> (n % 8)) & 0x01) )
 
 /* Global Data Items */
 SYSCFG g_cfg;
 uint32_t g_systemClock;
 const char timezone[6] = "+0100";
-
-/* Global Config variables */
 int  g_frame_rate = 30;
 bool g_drop_frame = false;
 
-/* SMPTE Encoder variables */
-bool g_encoderEnabled = false;
-uint8_t  g_txBitState = 0;
-uint8_t  g_txHalfBit = 0;
-uint32_t g_txBitCount = 0;
-uint32_t g_txFrameCount = 0;
-SMPTETimecode g_txTime;
-LTCFrame g_txFrame;
-
-/* SMPTE Decoder variables */
-
-bool g_decoderEnabled = false;
-SMPTETimecode g_rxTime;
-LTCFrame g_rxFrame;
-uint8_t* const g_code = (uint8_t*)&g_rxFrame;
-
-volatile uint32_t g_ui32HighPeriod = 0;
-volatile uint32_t g_ui32HighStartCount = 0;
-volatile uint32_t g_ui32HighEndCount = 0;
-volatile uint32_t g_ui32PeriodAvg = 0;
-
-volatile int g_oneflg = 0;
-volatile int g_rxBitCount = 0;
-volatile int g_drop = 0;
-volatile int g_fps = 0;
-
-volatile bool first_transition = false;
-volatile int new_bit = 0;
-
-//the sync word is available in bit 64 - 79,
-//see https://en.wikipedia.org/wiki/Linear_timecode
-
-const uint64_t sync_word = 0b0011111111111101;
-const uint64_t sync_word_rev = 0b1011111111111100;
-
-const uint64_t sync_mask = 0b1111111111111111;
-
-uint64_t bit_string = 0;
-int bit_index = 0;
-
-/*
- * Function Prototypes
- */
-
-Int main();
-
-int SMPTE_Encoder_Start();
-int SMPTE_Encoder_Stop(void);
-void SMPTE_Encoder_Reset(void);
-
-int SMPTE_Decoder_Start();
-int SMPTE_Decoder_Stop(void);
-void SMPTE_Decoder_Reset(void);
-
-Void SPI_SlaveTask(UArg a0, UArg a1);
-
-Void WTimer1AIntHandler(UArg arg);
-Void WTimer1BIntHandler(UArg arg);
-Void WTimer0AIntHandler(UArg arg);
-Void WTimer0BIntHandler(UArg arg);
+extern SMPTETimecode g_txTime;
+extern bool g_encoderEnabled;
+extern bool g_decoderEnabled;
 
 //*****************************************************************************
 // Main Program Entry Point
@@ -687,537 +627,95 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 }
 
 //*****************************************************************************
-//********************** SMPTE ENCODER SUPPORT ********************************
+// Set default runtime values
 //*****************************************************************************
 
-void SMPTE_Encoder_Reset(void)
+void InitSysDefaults(SYSCFG* p)
 {
-    /* Zero out the starting time struct */
-    memset(&g_txTime, 0, sizeof(g_txTime));
-
-    /* Set default time zone */
-    strcpy(g_txTime.timezone, timezone);
-
-  //g_txTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
-  //g_txTime.months = 1;        /* valid months are 1..12            */
-  //g_txTime.days   = 1;        /* day of month 1..31                */
-
-    g_txTime.hours  = 0;        /* hour 0..23                        */
-    g_txTime.mins   = 0;        /* minute 0..60                      */
-    g_txTime.secs   = 0;        /* second 0..60                      */
-    g_txTime.frame  = 0;        /* sub-second frame 0..(FPS - 1)     */
-
-    /* Reset the frame buffer */
-    ltc_frame_reset(&g_txFrame);
+    /* default parameters */
+    p->version  = MAKEREV(FIRMWARE_VER, FIRMWARE_REV);
+    p->build    = FIRMWARE_BUILD;
+    p->debug    = 0;
+    p->sysflags = 0;
 }
 
 //*****************************************************************************
-// Start the SMPTE Generator
+// Write system parameters from our global settings buffer to EEPROM.
+//
+// Returns:  0 = Sucess
+//          -1 = Error writing EEPROM data
 //*****************************************************************************
 
-int SMPTE_Encoder_Start(void)
+int32_t SysParamsWrite(SYSCFG* sp)
 {
-    uint32_t clockrate;
+    int32_t rc = 0;
 
-    if (g_encoderEnabled)
+    sp->version = MAKEREV(FIRMWARE_VER, FIRMWARE_REV);
+    sp->build   = FIRMWARE_BUILD;
+    sp->magic   = MAGIC;
+
+    rc = EEPROMProgram((uint32_t *)sp, 0, sizeof(SYSCFG));
+
+    System_printf("Writing System Parameters (size=%d)\n", sizeof(SYSCFG));
+    System_flush();
+
+    return rc;
+ }
+
+//*****************************************************************************
+// Read system parameters into our global settings buffer from EEPROM.
+//
+// Returns:  0 = Success
+//          -1 = Error reading flash
+//
+//*****************************************************************************
+
+int32_t SysParamsRead(SYSCFG* sp)
+{
+    InitSysDefaults(sp);
+
+    EEPROMRead((uint32_t *)sp, 0, sizeof(SYSCFG));
+
+    if (sp->magic != MAGIC)
+    {
+        System_printf("ERROR Reading System Parameters - Resetting Defaults...\n");
+        System_flush();
+
+        InitSysDefaults(sp);
+
+        SysParamsWrite(sp);
+
         return -1;
-
-    /* Turn the LED on to indicate active */
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-
-    /* Set the starting time members in the SMPTE tx frame buffer */
-    ltc_time_to_frame(&g_txFrame, &g_txTime, LTC_TV_525_60, 0);
-
-    /* Setup timer interrupt 2x bit clocks:
-     * 24 fps = 3840Hz
-     * 25 fps = 4000Hz
-     * 30 fps = 4800Hz
-     */
-
-    switch(g_frame_rate)
-    {
-    case 24:
-        /* 24 fps */
-        clockrate = 3840;
-        break;
-
-    case 25:
-        /* 25 fps */
-        clockrate = 4000;
-        break;
-
-    case 30:
-        /* 30 fps */
-        clockrate = 4800;
-        break;
-
-    default:
-        /* default to 30 fps */
-        g_frame_rate = 30;
-        clockrate = 4800;
-        break;
     }
 
-    g_txFrameCount = 0;
-    g_txBitCount = 0;
-    g_txHalfBit = 0;
-    g_encoderEnabled = true;
+    if (sp->version != MAKEREV(FIRMWARE_VER, FIRMWARE_REV))
+    {
+        System_printf("WARNING New Firmware Version - Resetting Defaults...\n");
+        System_flush();
 
-    /* Pre-load the state of the first bit in the frame */
-    g_txBitState = FRAME_BITSTATE(((uint8_t*)&g_txFrame), g_txBitCount);
+        InitSysDefaults(sp);
 
-    /* Enable the signal out relay to connect the SMPTE
-     * output signal to channel 24 on the tape machine.
-     */
-    GPIO_write(Board_RELAY, Board_RELAY_ON);
-    Task_sleep(50);
+        SysParamsWrite(sp);
 
-    /* SMPTE output pin low initially */
-    GPIO_write(Board_SMPTE_OUT, PIN_LOW);
+        return -1;
+    }
 
-    /* Set TIMER_A clock rate */
-    TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock/clockrate);
+    if (sp->build < FIRMWARE_MIN_BUILD)
+    {
+        System_printf("WARNING New Firmware BUILD - Resetting Defaults...\n");
+        System_flush();
 
-    /* Configure the WTIMER1A interrupt for timer timeout */
-    TimerIntEnable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
+        InitSysDefaults(sp);
 
-    /* Enable the TIMER1B interrupt on the processor (NVIC) */
-    IntEnable(INT_WTIMER1A);
+        SysParamsWrite(sp);
 
-    /* Enable TIMER1A */
-    TimerEnable(WTIMER1_BASE, TIMER_A);
+        return -1;
+    }
+
+    System_printf("System Parameters Loaded (size=%d)\n", sizeof(SYSCFG));
+    System_flush();
 
     return 0;
 }
-
-//*****************************************************************************
-// Stop the SMPTE Generator
-//*****************************************************************************
-
-int SMPTE_Encoder_Stop(void)
-{
-    if (!g_encoderEnabled)
-        return 0;
-
-    /* Disable TIMER1A */
-    TimerDisable(WTIMER1_BASE, TIMER_A);
-
-    /* Disable the TIMER1A interrupt */
-    IntDisable(INT_WTIMER1A);
-
-    /* Turn off TIMER1B interrupt */
-    TimerIntDisable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
-    /* Clear any pending interrupt flag */
-    TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
-    /* SMPTE output pin low */
-    GPIO_write(Board_SMPTE_OUT, PIN_LOW);
-
-    /* Relay off */
-    GPIO_write(Board_RELAY, Board_RELAY_OFF);
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-
-    g_encoderEnabled = false;
-
-    return 1;
-}
-//*****************************************************************************
-// SMPTE Generator WTIMER Interrupt Handler
-//*****************************************************************************
-
-Void WTimer1AIntHandler(UArg arg)
-{
-    /* Clear the timer interrupt flag */
-    TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
-    /* Set drop frame bit if enabled */
-    g_txFrame.dfbit = (g_drop_frame) ? 1 : 0;
-
-    /* Flip half bit state indicator */
-    g_txHalfBit = !g_txHalfBit;
-
-    /* First half bit true, the flip at start of new bit */
-    if (g_txHalfBit)
-    {
-        GPIO_toggle(Board_SMPTE_OUT);
-    }
-    else
-    {
-        /* Half bit false indicates second half of bit */
-        if (g_txBitState)
-        {
-            /* A high 1-bit changes half way */
-            GPIO_toggle(Board_SMPTE_OUT);
-        }
-
-        /* Check if a full 80-bit frame has been transmitted */
-        if (g_txBitCount >= LTC_FRAME_BIT_COUNT)
-        {
-            /* If so, then increment the frame time */
-            ltc_frame_increment(&g_txFrame, g_frame_rate, LTC_TV_625_50, 0);
-
-            /* Increment frame counter */
-            ++g_txFrameCount;
-
-            /* Reset frame bit counter */
-            g_txBitCount = 0;
-
-            /* Toggle the LED on each packet received */
-            GPIO_toggle(Board_STAT_LED);
-        }
-
-        /* Pre-load the state of the next bit to go out */
-        g_txBitState = FRAME_BITSTATE(((uint8_t*)&g_txFrame), g_txBitCount);
-
-        /* Increment the frame bit counter */
-        ++g_txBitCount;
-    }
-}
-
-Void WTimer1BIntHandler(UArg arg)
-{
-    /* Clear the timer interrupt flag */
-    TimerIntClear(WTIMER1_BASE, TIMER_TIMB_TIMEOUT);
-}
-
-//*****************************************************************************
-//********************** SMPTE DECODER SUPPORT ********************************
-//*****************************************************************************
-
-Void SMPTE_Decoder_Reset(void)
-{
-    /* Zero out the starting time struct */
-    memset(&g_rxTime, 0, sizeof(g_rxTime));
-
-    /* Set default time zone */
-    strcpy(g_rxTime.timezone, timezone);
-
-    g_rxTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
-    g_rxTime.months = 1;        /* valid months are 1..12            */
-    g_rxTime.days   = 1;        /* day of month 1..31                */
-    g_rxTime.hours  = 0;        /* hour 0..23                        */
-    g_rxTime.mins   = 0;        /* minute 0..60                      */
-    g_rxTime.secs   = 0;        /* second 0..60                      */
-    g_rxTime.frame  = 0;        /* sub-second frame 0..(FPS - 1)     */
-
-    /* Reset the frame buffer */
-    ltc_frame_reset(&g_rxFrame);
-
-    /* Set the starting time members in the smpte frame */
-    ltc_time_to_frame(&g_rxFrame, &g_rxTime, LTC_TV_525_60, 0);
-}
-
-//*****************************************************************************
-// Initialize and start the SMPTE decoder edge timer interrupts
-//*****************************************************************************
-
-int SMPTE_Decoder_Start(void)
-{
-    /* Status LED on */
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-
-    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
-
-
-    /* Make sure the decoder interrupt isn't enabled */
-    SMPTE_Decoder_Stop();
-
-    /* Zero out the starting time struct */
-    memset(&g_rxTime, 0, sizeof(g_rxTime));
-
-    /* Set default time zone */
-    strcpy(g_rxTime.timezone, timezone);
-
-    /* Reset global variables */
-    g_oneflg = g_rxBitCount = g_drop = g_fps = 0;
-
-    first_transition = false;
-    new_bit = 0;
-
-    /* Reset the frame buffer */
-    ltc_frame_reset(&g_rxFrame);
-
-    /* Configure the GPIO for the Timer peripheral */
-    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5);
-
-    /* Configure the GPIO to be CCP pins for the Timer peripheral */
-    GPIOPinConfigure(GPIO_PC4_WT0CCP0);
-    GPIOPinConfigure(GPIO_PC5_WT0CCP1);
-
-    /* Initialize Timers A and B to both run as periodic up-count edge capture
-     * This will split the 64-bit timer into two 32-bit timers.
-     */
-    TimerConfigure(WTIMER0_BASE, (TIMER_CFG_SPLIT_PAIR |
-                                  TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP |
-                                  TIMER_CFG_B_PERIODIC | TIMER_CFG_B_CAP_TIME_UP));
-
-    /* To use the wide timer in edge time mode, it must be preloaded with initial
-     * values. If the prescaler is used, then it must be preloaded as well.
-     * Since we want to use all 48-bits for both timers it will be loaded with
-     * the maximum of 0xFFFFFFFF for the 32-bit wide split timers, and 0xFF to add
-     * the additional 8-bits to the split timers with the prescaler.
-     */
-    TimerLoadSet(WTIMER0_BASE, TIMER_BOTH, 0xFFFFFFFF);
-    TimerPrescaleSet(WTIMER0_BASE, TIMER_BOTH, 0x00);
-
-    /* Configure Timer A to trigger on a Positive Edge and configure
-     * Timer B to trigger on a Negative Edge.
-     */
-    TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_POS_EDGE);
-    TimerControlEvent(WTIMER0_BASE, TIMER_B, TIMER_EVENT_NEG_EDGE);
-
-    /* Clear the interrupt status flag.  This is done to make sure the
-     * interrupt flag is cleared before we enable it.
-     */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
-
-    /* Enable the Timer A and B interrupts for Capture Events */
-    TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
-
-    /* Enable the interrupts for Timer A and Timer B on the processor (NVIC) */
-    IntEnable(INT_WTIMER0A);
-    IntEnable(INT_WTIMER0B);
-
-    /* Enable both Timer A and Timer B to begin the application */
-    TimerEnable(WTIMER0_BASE, TIMER_BOTH);
-
-    /* SMPTE input mute off */
-    GPIO_write(Board_SMPTE_MUTE, PIN_HIGH);
-
-    return 0;
-}
-
-//*****************************************************************************
-// Stop the SMPTE Decoder
-//*****************************************************************************
-
-int SMPTE_Decoder_Stop(void)
-{
-    /* SMPTE input mute on */
-    GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
-
-    /* Disable both Timer A and Timer B */
-    TimerDisable(WTIMER0_BASE, TIMER_BOTH);
-
-    IntDisable(INT_WTIMER0A);
-    IntDisable(INT_WTIMER0B);
-
-    /* Disable the Timer A and B interrupts for Capture Events */
-    TimerIntDisable(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
-
-    /* Clear any interrupts pending */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
-
-    /* Status LED */
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-
-    return 0;
-}
-
-//*****************************************************************************
-// SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
-//*****************************************************************************
-
-/* Rising Edge Interrupt (Start of Pulse) */
-Void WTimer0AIntHandler(UArg arg)
-{
-    GPIO_write(Board_FRAME_SYNC, PIN_HIGH);
-
-    /* Clear the timer interrupt */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
-
-    /* Store the end time.  In Edge Time Mode, the prescaler is used for the
-     * the most significant bits.  Therefore, it must be shifted by 16 before
-     * being added onto the final value.
-     */
-    g_ui32HighStartCount = TimerValueGet(WTIMER0_BASE, TIMER_A);  // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_A) << 32);
-}
-
-/* Falling Edge Interrupt (End of Pulse) */
-Void WTimer0BIntHandler(UArg arg)
-{
-    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
-
-    uint32_t t;
-    bool new_bit_available = false;
-
-    /* Clear the timer interrupt */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
-
-    /* Store the end time.  In Edge Time Mode, the prescaler is used for the
-     * the most significant bits.  Therefore, it must be shifted by 16 before
-     * being added onto the final value.
-     */
-    g_ui32HighEndCount = TimerValueGet(WTIMER0_BASE, TIMER_B);    // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_B) << 32);
-
-    /* Simple check to avoid overflow cases.  The End Count is the
-     * second measurement taken and therefore should never be smaller
-     * than the Start Count unless the timer has overflowed.  If that
-     * occurs, then add 2^16-1 to the End Count before subtraction.
-     */
-    if (g_ui32HighEndCount > g_ui32HighStartCount)
-    {
-        g_ui32HighPeriod = g_ui32HighEndCount - g_ui32HighStartCount;
-    }
-    else
-    {
-        //g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 16777215) - (uint64_t)g_ui32HighStartCount);
-        //g_ui32HighPeriod = g_ui32HighStartCount - g_ui32HighEndCount;
-
-        /* Either it was an overflow or the rising edge was missed.
-         * So, we just ignore this edge interrupt and return.
-         */
-        return;
-    }
-
-    /* We've now interrupted on the falling edge and can calculate the
-     * pulse width time in microseconds by dividing t period count by 80.
-     *
-     *  pulse width: 416.7us(30fps)
-     *  0-bit x 30fps --> 416.7us/bit
-     *
-     * Then compare with average lenth of a one bit (haveing some margin
-     * of at least of 1/4 of average, finally decide if it is a
-     * long (0) or a short (1)
-     */
-
-    /* Calculate the average pulse period */
-    g_ui32PeriodAvg = (g_ui32HighPeriod >> 2);
-
-    /* Normally we'd divide the period count by 80 here to get the pulse
-     * time in microseconds. However, we scale all the other timing
-     * constants by 80 instead to avoid this divison.
-     */
-    t  = g_ui32HighPeriod;
-
-    /* Now look at the period and decide if it's a one or zero */
-    if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
-    {
-        if (first_transition)
-        {
-            /* First bit transition */
-            first_transition = false;
-        }
-        else
-        {
-            // Second bit transition
-            first_transition = true;
-            new_bit_available = true;
-            new_bit = 1;
-        }
-    }
-    else if (t >= ZERO_TIME_MIN && t < ZERO_TIME_MAX)
-    {
-        new_bit_available = true;
-        first_transition = true;
-        new_bit = 0;
-    }
-    else
-    {
-        //first bit change? or something is wrong!
-    }
-
-    if (new_bit_available)
-    {
-        /* Shift new bit into the 80-bit frame receive buffer */
-
-        typedef struct LTC_80_BITS_T {
-            uint64_t    data;   /* 64-bit frame data */
-            uint16_t    sync;   /* 16-bit sync bytes */
-        } LTC_80_BITS;
-
-        LTC_80_BITS* p = (LTC_80_BITS*)&g_rxFrame;
-
-        uint64_t w64 = p->data;
-        uint16_t w16 = p->sync;
-
-        /* shift the sync bits */
-        w16 = w16 << 1;
-
-        /* carry bit 63 into sync bit zero if needed */
-        if (w64 & 0x8000000000000000)
-            w16 |= 1;
-        else
-            w16 &= (~1);
-
-        /* shift the frame word bits */
-        w64 = w64 << 1;
-
-        /* Add in the new data high bit if needed */
-        if (new_bit)
-            w64 |= 1;
-        else
-            w64 &= (~1);
-
-        /* store shifted frame & sync bits back into frame buffer */
-        p->data = w64;
-        p->sync = w16;
-
-        g_rxBitCount++;
-
-        /* Must see the SMPTE sync word at the end of frame to consider it a
-         * valid packet. If so, we parse out the frame members into our buffer.
-         */
-
-        if (g_rxBitCount >= LTC_FRAME_BIT_COUNT)
-        {
-            g_rxBitCount = 0;
-
-            /* Toggle the LED on each packet received */
-            GPIO_toggle(Board_STAT_LED);
-
-            if (g_rxFrame.sync_word == sync_word)
-            {
-                /* Parse the buffer and get time members in the SMPTE frame */
-                //ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
-
-                g_rxTime.hours = g_rxFrame.hours_units + g_rxFrame.hours_tens * 10;
-                g_rxTime.mins  = g_rxFrame.mins_units  + g_rxFrame.mins_tens * 10;
-                g_rxTime.secs  = g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
-                g_rxTime.frame = g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
-
-                /* Reset the pulse bit counter */
-                g_rxBitCount = 0;
-            }
-            else if (g_rxFrame.sync_word == sync_word_rev)
-            {
-                /* Reset the pulse bit counter */
-                g_rxBitCount = 0;
-            }
-        }
-    }
-}
-
-
-
-#if 0
-
-void LTC_SMPTE::parse_code()
-{
-    frame = (code[1] & 0x03) * 10 + (code[0] & 0x0f);
-    sec   = (code[3] & 0x07) * 10 + (code[2] & 0x0f);
-    min   = (code[5] & 0x07) * 10 + (code[4] & 0x0f);
-    hour  = (code[7] & 0x03) * 10 + (code[6] & 0x0f);
-    drop  = code[1] & (1<<2) ? 1 : 0;
-    received = 1;
-}
-
-handleInterrupt() {
-  noInterrupts(); // stop being interrupted (got to hurry not to miss the next one)
-  long time = micros(); // record curent time (in micro-seconds)
-  duration = time - lastTime; // Get the duration from the last interrupt
-  ...
-  compare with average lenth of a one (have some margin at least of 1/4 of average - see further)
-  (Calculate 1/4 by bit shifting to be quick).
-  decide if it is a long (0) or a short (1)
-  ...
-  lastTime = time;
-  if is was a one {
-     long average = duration; // average time for a one (short)
-  }
-}
-
-#endif
 
 /* End-Of-File */

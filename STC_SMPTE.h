@@ -63,6 +63,11 @@
 /* pulse width: 416.7us(30fps)
  * 80bit x 30frame/s --> 416.7us/bit
  */
+typedef struct ltcframe_t {
+    uint64_t data;
+    uint16_t sync;
+    uint32_t timestampfirstedge;
+} ltcframe_t;
 
 /* pulse times in microseconds */
 #define MAX_DELTA                   15
@@ -102,5 +107,36 @@ typedef struct _SYSCFG
 	uint32_t debug;
     uint32_t sysflags;
 } SYSCFG;
+
+/*** Function Prototypes ***************************************************/
+
+Int main();
+void InitSysDefaults(SYSCFG* p);
+int32_t SysParamsWrite(SYSCFG* sp);
+int32_t SysParamsRead(SYSCFG* sp);
+Void SPI_SlaveTask(UArg a0, UArg a1);
+
+int SMPTE_Encoder_Start();
+int SMPTE_Encoder_Stop(void);
+void SMPTE_Encoder_Reset(void);
+Void WTimer1AIntHandler(UArg arg);
+Void WTimer1BIntHandler(UArg arg);
+
+int SMPTE_Decoder_Start();
+int SMPTE_Decoder_Stop(void);
+void SMPTE_Decoder_Reset(void);
+Void WTimer0AIntHandler(UArg arg);
+Void WTimer0BIntHandler(UArg arg);
+int hour(ltcframe_t* ltc);
+int minute(ltcframe_t* ltc);
+int second(ltcframe_t* ltc);
+int frame(ltcframe_t* ltc);
+bool bit10(ltcframe_t* ltc);
+bool bit11(ltcframe_t* ltc);
+bool bit27(ltcframe_t* ltc);
+bool bit43(ltcframe_t* ltc);
+bool bit58(ltcframe_t* ltc);
+bool bit59(ltcframe_t* ltc);
+uint32_t userdata(ltcframe_t * ltc);
 
 /* End-Of-File */
