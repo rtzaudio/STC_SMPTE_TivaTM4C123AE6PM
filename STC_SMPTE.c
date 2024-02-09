@@ -142,7 +142,7 @@ volatile uint32_t g_ui32HighEndCount = 0;
 volatile uint32_t g_ui32PeriodAvg = 0;
 
 volatile int g_oneflg = 0;
-volatile int g_bitCount = 0;
+volatile int g_rxBitCount = 0;
 volatile int g_drop = 0;
 volatile int g_fps = 0;
 
@@ -927,7 +927,7 @@ int SMPTE_Decoder_Start(void)
     strcpy(g_rxTime.timezone, timezone);
 
     /* Reset global variables */
-    g_oneflg = g_bitCount = g_drop = g_fps = 0;
+    g_oneflg = g_rxBitCount = g_drop = g_fps = 0;
 
     first_transition = false;
     new_bit = 0;
@@ -991,9 +991,6 @@ int SMPTE_Decoder_Start(void)
 
 int SMPTE_Decoder_Stop(void)
 {
-    /* Status LED */
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-
     /* SMPTE input mute on */
     GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
 
@@ -1008,6 +1005,9 @@ int SMPTE_Decoder_Stop(void)
 
     /* Clear any interrupts pending */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
+
+    /* Status LED */
+    GPIO_write(Board_STAT_LED, Board_LED_ON);
 
     return 0;
 }
@@ -1147,14 +1147,19 @@ Void WTimer0BIntHandler(UArg arg)
         p->data = w64;
         p->sync = w16;
 
-        g_bitCount++;
+        g_rxBitCount++;
 
         /* Must see the SMPTE sync word at the end of frame to consider it a
          * valid packet. If so, we parse out the frame members into our buffer.
          */
 
-        if (g_bitCount >= 80)
+        if (g_rxBitCount >= LTC_FRAME_BIT_COUNT)
         {
+            g_rxBitCount = 0;
+
+            /* Toggle the LED on each packet received */
+            GPIO_toggle(Board_STAT_LED);
+
             if (g_rxFrame.sync_word == sync_word)
             {
                 /* Parse the buffer and get time members in the SMPTE frame */
@@ -1165,19 +1170,13 @@ Void WTimer0BIntHandler(UArg arg)
                 g_rxTime.secs  = g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
                 g_rxTime.frame = g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
 
-                /* Toggle the LED on each packet received */
-                GPIO_toggle(Board_STAT_LED);
-
                 /* Reset the pulse bit counter */
-                g_bitCount = 0;
+                g_rxBitCount = 0;
             }
             else if (g_rxFrame.sync_word == sync_word_rev)
             {
-                /* Toggle the LED on each packet received */
-                GPIO_toggle(Board_STAT_LED);
-
                 /* Reset the pulse bit counter */
-                g_bitCount = 0;
+                g_rxBitCount = 0;
             }
         }
     }
