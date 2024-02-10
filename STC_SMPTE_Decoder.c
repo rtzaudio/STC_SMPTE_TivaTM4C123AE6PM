@@ -179,7 +179,6 @@ int SMPTE_Decoder_Start(void)
 
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
 
-
     /* Make sure the decoder interrupt isn't enabled */
     SMPTE_Decoder_Stop();
 
