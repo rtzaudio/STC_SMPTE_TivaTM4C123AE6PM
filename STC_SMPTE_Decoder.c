@@ -108,7 +108,6 @@
 /* Constants and Macros */
 extern SYSCFG g_cfg;
 extern  uint32_t g_systemClock;
-extern const char timezone[];
 
 /* SMPTE Decoder variables */
 SMPTETimecode g_rxTime;
@@ -136,9 +135,6 @@ const uint64_t sync_word_rev = 0b1011111111111100;
 
 const uint64_t sync_mask = 0b1111111111111111;
 
-uint64_t bit_string = 0;
-int bit_index = 0;
-
 //*****************************************************************************
 //********************** SMPTE DECODER SUPPORT ********************************
 //*****************************************************************************
@@ -149,9 +145,9 @@ Void SMPTE_Decoder_Reset(void)
     memset(&g_rxTime, 0, sizeof(g_rxTime));
 
     /* Set default time zone */
-    strcpy(g_rxTime.timezone, timezone);
+    strcpy(g_rxTime.timezone, g_cfg.timezone);
 
-    g_rxTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
+    g_rxTime.years  = 24;       /* LTC date uses 2-digit year 00-99  */
     g_rxTime.months = 1;        /* valid months are 1..12            */
     g_rxTime.days   = 1;        /* day of month 1..31                */
     g_rxTime.hours  = 0;        /* hour 0..23                        */
@@ -184,9 +180,6 @@ int SMPTE_Decoder_Start(void)
 
     /* Zero out the starting time struct */
     memset(&g_rxTime, 0, sizeof(g_rxTime));
-
-    /* Set default time zone */
-    strcpy(g_rxTime.timezone, timezone);
 
     /* Reset global variables */
     g_oneflg = g_rxBitCount = g_drop = g_fps = 0;
@@ -298,10 +291,10 @@ Void WTimer0AIntHandler(UArg arg)
 /* Falling Edge Interrupt (End of Pulse) */
 Void WTimer0BIntHandler(UArg arg)
 {
-    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
-
     uint32_t t;
     bool new_bit_available = false;
+
+    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
 
     /* Clear the timer interrupt */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
@@ -389,22 +382,22 @@ Void WTimer0BIntHandler(UArg arg)
         uint16_t w16 = p->sync;
 
         /* shift the sync bits */
-        w16 = w16 << 1;
+        w16 = w16 >> 1;
 
         /* carry bit 63 into sync bit zero if needed */
         if (w64 & 0x8000000000000000)
-            w16 |= 1;
+            w16 |= 0x8000;
         else
-            w16 &= (~1);
+            w16 &= ~0x8000;
 
         /* shift the frame word bits */
-        w64 = w64 << 1;
+        w64 = w64 >> 1;
 
         /* Add in the new data high bit if needed */
         if (new_bit)
-            w64 |= 1;
+            w64 |= 0x8000000000000000;
         else
-            w64 &= (~1);
+            w64 &= ~0x8000000000000000;
 
         /* store shifted frame & sync bits back into frame buffer */
         p->data = w64;

@@ -107,15 +107,9 @@
 
 /* Constants and Macros */
 
-/* Returns the state of a bit number in the frame buffer */
-#define FRAME_GETBIT(b, n)    ( (((b[n / 8]) >> (n % 8)) & 0x01) )
-
 /* Global Data Items */
 SYSCFG g_cfg;
 uint32_t g_systemClock;
-const char timezone[6] = "+0100";
-int  g_frame_rate = 30;
-bool g_drop_frame = false;
 
 extern SMPTETimecode g_txTime;
 extern bool g_encoderEnabled;
@@ -197,15 +191,12 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     SPI_Params spiParams;
     SPI_Handle hSlave;
 
-    /* Set busy pin high to indicate busy status */
-    GPIO_write(Board_BUSY, PIN_HIGH);
-
-    /* Initialize the default servo and program data values */
-    memset(&g_cfg, 0, sizeof(SYSCFG));
-
     /* Read system parameters from EEPROM */
     //SysParamsRead(&g_cfg);
     InitSysDefaults(&g_cfg);
+
+    /* Set busy pin high to indicate busy status */
+    GPIO_write(Board_BUSY, PIN_HIGH);
 
     /* Open SLAVE SPI port from STC motherboard
      * 1 Mhz, Moto fmt, polarity 1, phase 0
@@ -310,7 +301,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             {
                 /* READ SMPTE GENERATOR CONTROL REGISTER */
 
-                switch(g_frame_rate)
+                switch(g_cfg.frame_rate)
                 {
                 case 24:
                     uReply = SMPTE_CTL_FPS24;
@@ -321,7 +312,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                     break;
 
                 case 30:
-                    uReply = (g_drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
+                    uReply = (g_cfg.drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
                     break;
 
                 default:
@@ -353,28 +344,28 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 switch(SMPTE_ENCCTL_FPS(uRequest))
                 {
                 case SMPTE_CTL_FPS24:
-                    g_frame_rate = 24;
-                    g_drop_frame = false;
+                    g_cfg.frame_rate = 24;
+                    g_cfg.drop_frame = false;
                     break;
 
                 case SMPTE_CTL_FPS25:
-                    g_frame_rate = 25;
-                    g_drop_frame = false;
+                    g_cfg.frame_rate = 25;
+                    g_cfg.drop_frame = false;
                     break;
 
                 case SMPTE_CTL_FPS30:
-                    g_frame_rate = 30;
-                    g_drop_frame = false;
+                    g_cfg.frame_rate = 30;
+                    g_cfg.drop_frame = false;
                     break;
 
                 case SMPTE_CTL_FPS30D:
-                    g_frame_rate = 30;
-                    g_drop_frame = true;
+                    g_cfg.frame_rate = 30;
+                    g_cfg.drop_frame = true;
                     break;
 
                 default:
-                    g_frame_rate = 30;
-                    g_drop_frame = true;
+                    g_cfg.frame_rate = 30;
+                    g_cfg.drop_frame = true;
                     break;
                 }
 
@@ -401,7 +392,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             {
                 /* READ SMPTE DECODER CONTROL REGISTER */
 
-                switch(g_frame_rate)
+                switch(g_cfg.frame_rate)
                 {
                 case 24:
                     uReply = SMPTE_CTL_FPS24;
@@ -412,7 +403,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                     break;
 
                 case 30:
-                    uReply = (g_drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
+                    uReply = (g_cfg.drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
                     break;
 
                 default:
@@ -444,28 +435,28 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 switch(SMPTE_DECCTL_FPS(uRequest))
                 {
                 case SMPTE_CTL_FPS24:
-                    g_frame_rate = 24;
-                    g_drop_frame = false;
+                    g_cfg.frame_rate = 24;
+                    g_cfg.drop_frame = false;
                     break;
 
                 case SMPTE_CTL_FPS25:
-                    g_frame_rate = 25;
-                    g_drop_frame = false;
+                    g_cfg.frame_rate = 25;
+                    g_cfg.drop_frame = false;
                     break;
 
                 case SMPTE_CTL_FPS30:
-                    g_frame_rate = 30;
-                    g_drop_frame = false;
+                    g_cfg.frame_rate = 30;
+                    g_cfg.drop_frame = false;
                     break;
 
                 case SMPTE_CTL_FPS30D:
-                    g_frame_rate = 30;
-                    g_drop_frame = true;
+                    g_cfg.frame_rate = 30;
+                    g_cfg.drop_frame = true;
                     break;
 
                 default:
-                    g_frame_rate = 30;
-                    g_drop_frame = true;
+                    g_cfg.frame_rate = 30;
+                    g_cfg.drop_frame = true;
                     break;
                 }
 
@@ -632,11 +623,18 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 
 void InitSysDefaults(SYSCFG* p)
 {
-    /* default parameters */
-    p->version  = MAKEREV(FIRMWARE_VER, FIRMWARE_REV);
-    p->build    = FIRMWARE_BUILD;
-    p->debug    = 0;
-    p->sysflags = 0;
+    /* zero out config structure */
+    memset(p, 0, sizeof(SYSCFG));
+
+    /* set default parameters */
+    p->version    = MAKEREV(FIRMWARE_VER, FIRMWARE_REV);
+    p->build      = FIRMWARE_BUILD;
+    p->debug      = 0;
+    p->sysflags   = 0;
+    p->frame_rate = 30;
+    p->drop_frame = false;
+
+    strcpy(p->timezone, "+0100");
 }
 
 //*****************************************************************************

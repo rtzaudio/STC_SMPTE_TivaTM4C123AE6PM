@@ -120,9 +120,6 @@ LTCFrame g_txFrame;
 /* Global Config variables */
 extern SYSCFG g_cfg;
 extern uint32_t g_systemClock;
-extern const char timezone[];
-extern int  g_frame_rate;
-extern bool g_drop_frame;
 
 //*****************************************************************************
 //********************** SMPTE ENCODER SUPPORT ********************************
@@ -134,7 +131,7 @@ void SMPTE_Encoder_Reset(void)
     memset(&g_txTime, 0, sizeof(g_txTime));
 
     /* Set default time zone */
-    strcpy(g_txTime.timezone, timezone);
+    strcpy(g_txTime.timezone, g_cfg.timezone);
 
   //g_txTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
   //g_txTime.months = 1;        /* valid months are 1..12            */
@@ -172,7 +169,7 @@ int SMPTE_Encoder_Start(void)
      * 30 fps = 4800Hz
      */
 
-    switch(g_frame_rate)
+    switch(g_cfg.frame_rate)
     {
     case 24:
         /* 24 fps */
@@ -191,7 +188,7 @@ int SMPTE_Encoder_Start(void)
 
     default:
         /* default to 30 fps */
-        g_frame_rate = 30;
+        g_cfg.frame_rate = 30;
         clockrate = 4800;
         break;
     }
@@ -270,7 +267,7 @@ Void WTimer1AIntHandler(UArg arg)
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
 
     /* Set drop frame bit if enabled */
-    g_txFrame.dfbit = (g_drop_frame) ? 1 : 0;
+    g_txFrame.dfbit = (g_cfg.drop_frame) ? 1 : 0;
 
     /* Flip half bit state indicator */
     g_txHalfBit = !g_txHalfBit;
@@ -293,7 +290,7 @@ Void WTimer1AIntHandler(UArg arg)
         if (g_txBitCount >= LTC_FRAME_BIT_COUNT)
         {
             /* If so, then increment the frame time */
-            ltc_frame_increment(&g_txFrame, g_frame_rate, LTC_TV_625_50, 0);
+            ltc_frame_increment(&g_txFrame, g_cfg.frame_rate, LTC_TV_625_50, 0);
 
             /* Increment frame counter */
             ++g_txFrameCount;

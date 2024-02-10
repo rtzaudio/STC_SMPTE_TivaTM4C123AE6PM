@@ -60,17 +60,17 @@
 
 #define TIMEOUT_SPI			500		/* Timeout for SPI communications */
 
-/* pulse width: 416.7us(30fps)
+/* SMPTE 80-bit frame buffer */
+typedef struct ltcframe_t {
+    uint64_t data;      /* 64-bits data */
+    uint16_t sync;      /* 16-bits sync */
+} ltcframe_t;           /* 80-bit frame */
+
+/* pulse times in microseconds
+ * pulse width: 416.7us(30fps)
  * 80bit x 30frame/s --> 416.7us/bit
  */
-typedef struct ltcframe_t {
-    uint64_t data;
-    uint16_t sync;
-    uint32_t timestampfirstedge;
-} ltcframe_t;
-
-/* pulse times in microseconds */
-#define MAX_DELTA                   15
+#define MAX_DELTA                   20  /* was 15 */
 #define EXPECTED_DURATION_SINGLE    208
 #define EXPECTED_DURATION_DOUBLE    (EXPECTED_DURATION_SINGLE * 2)
 
@@ -106,6 +106,9 @@ typedef struct _SYSCFG
     /*** GLOBAL PARAMETERS ***/
 	uint32_t debug;
     uint32_t sysflags;
+    char timezone[6];
+    int32_t frame_rate;
+    bool drop_frame;
 } SYSCFG;
 
 /*** Function Prototypes ***************************************************/
