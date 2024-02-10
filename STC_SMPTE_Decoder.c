@@ -369,22 +369,22 @@ void HandleEdgeChange(void)
         uint16_t w16 = p->sync;
 
         /* shift the sync bits */
-        w16 = w16 >> 1;
+        w16 = w16 << 1;
 
         /* carry bit 63 into sync bit zero if needed */
         if (w64 & 0x8000000000000000)
-            w16 |= 0x8000;
+            w16 |= 1;
         else
-            w16 &= ~0x8000;
+            w16 &= ~1;
 
         /* shift the frame word bits */
-        w64 = w64 >> 1;
+        w64 = w64 << 1;
 
         /* Add in the new data high bit if needed */
         if (new_bit)
-            w64 |= 0x8000000000000000;
+            w64 |= 1;
         else
-            w64 &= ~0x8000000000000000;
+            w64 &= ~1;
 
         /* store shifted frame & sync bits back into frame buffer */
         p->data = w64;
