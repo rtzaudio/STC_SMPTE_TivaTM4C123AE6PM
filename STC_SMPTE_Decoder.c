@@ -180,9 +180,9 @@ int SMPTE_Decoder_Start(void)
     memset(&g_rxTime, 0, sizeof(g_rxTime));
 
     /* Reset global variables */
-    g_rxBitCount = 0;
     new_bit = 0;
     first_transition = false;
+    g_rxBitCount = g_uiPeriod = g_uiLowCount = g_uiHighCount = 0;
 
     /* Reset the frame buffer */
     ltc_frame_reset(&g_rxFrame);
@@ -273,6 +273,7 @@ int SMPTE_Decoder_Stop(void)
 /* Rising Edge Interrupt (Start of Pulse) */
 Void WTimer0AIntHandler(UArg arg)
 {
+    /* Echo high pin change to SYNC pin */
     GPIO_write(Board_FRAME_SYNC, PIN_HIGH);
 
     /* Clear the timer interrupt */
@@ -287,6 +288,7 @@ Void WTimer0AIntHandler(UArg arg)
 /* Falling Edge Interrupt (End of Pulse) */
 Void WTimer0BIntHandler(UArg arg)
 {
+    /* Echo low pin change to SYNC pin */
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
 
     /* Clear the timer interrupt */
@@ -312,10 +314,7 @@ void HandleEdgeChange(void)
     else
         g_uiPeriod = g_uiHighCount - g_uiLowCount;
 
-    /* We've now interrupted on the falling edge and can calculate the
-     * pulse width time in microseconds by dividing t period count by 80.
-     *
-     *  pulse width: 416.7us(30fps)
+    /*  pulse width: 416.7us(30fps)
      *  0-bit x 30fps --> 416.7us/bit
      *
      * Then compare with average lenth of a one bit (haveing some margin
@@ -398,7 +397,7 @@ void HandleEdgeChange(void)
 
         if (g_rxBitCount >= LTC_FRAME_BIT_COUNT)
         {
-            g_rxBitCount = 0;
+            //g_rxBitCount = 0;
 
             /* Toggle the LED on each packet received */
             GPIO_toggle(Board_STAT_LED);
