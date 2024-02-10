@@ -105,57 +105,6 @@
 #include "STC_SMPTE_SPI.h"
 #include "libltc\ltc.h"
 
-/** turn a numeric literal into a hex constant
- *  (avoids problems with leading zeroes)
- *  8-bit constants max value 0x11111111, always fits in unsigned long
- */
-#define HEX__(n) 0x##n##LU
-
-/**
- * 8-bit conversion function
- */
-#define B8__(x) ((x&0x0000000FLU)?1:0)  \
-    +((x&0x000000F0LU)?2:0)  \
-    +((x&0x00000F00LU)?4:0)  \
-    +((x&0x0000F000LU)?8:0)  \
-    +((x&0x000F0000LU)?16:0) \
-    +((x&0x00F00000LU)?32:0) \
-    +((x&0x0F000000LU)?64:0) \
-    +((x&0xF0000000LU)?128:0)
-
-/** for upto 8-bit binary constants */
-#define B8(d) ((unsigned char)B8__(HEX__(d)))
-
-/** for upto 16-bit binary constants, MSB first */
-#define B16(dmsb,dlsb) (((unsigned short)B8(dmsb)<<8) + B8(dlsb))
-
-/** turn a numeric literal into a hex constant
- *(avoids problems with leading zeroes)
- * 8-bit constants max value 0x11111111, always fits in unsigned long
- */
-#define HEX__(n) 0x##n##LU
-
-/** 8-bit conversion function */
-#define B8__(x) ((x&0x0000000FLU)?1:0)  \
-    +((x&0x000000F0LU)?2:0)  \
-    +((x&0x00000F00LU)?4:0)  \
-    +((x&0x0000F000LU)?8:0)  \
-    +((x&0x000F0000LU)?16:0) \
-    +((x&0x00F00000LU)?32:0) \
-    +((x&0x0F000000LU)?64:0) \
-    +((x&0xF0000000LU)?128:0)
-
-/** for upto 8-bit binary constants */
-#define B8(d) ((unsigned char)B8__(HEX__(d)))
-
-/** for upto 16-bit binary constants, MSB first */
-#define B16(dmsb,dlsb) (((unsigned short)B8(dmsb)<<8) + B8(dlsb))
-
-/* Example usage:
- * B8(01010101) = 85
- * B16(10101010,01010101) = 43605
- */
-
 /* Constants and Macros */
 extern SYSCFG g_cfg;
 extern  uint32_t g_systemClock;
@@ -175,6 +124,9 @@ volatile int g_rxBitCount = 0;
 volatile bool first_transition = false;
 volatile int new_bit = 0;
 
+uint64_t bit_string = 0;
+int bit_index = 0;
+
 //the sync word is available in bit 64 - 79,
 //see https://en.wikipedia.org/wiki/Linear_timecode
 
@@ -183,6 +135,11 @@ const uint64_t sync_word_rev = 0b1011111111111100;
 const uint64_t sync_mask = 0b1111111111111111;
 
 static void HandleEdgeChange(void);
+
+void ltc_frame_complete(void);
+void decode_ltc_bit(int new_bit);
+int decode_part(uint64_t bit_string, int start_bit,int stop_bit);
+uint64_t reverse_bit_order(uint64_t v, int significant_bits);
 
 //*****************************************************************************
 //********************** SMPTE DECODER SUPPORT ********************************
@@ -411,6 +368,9 @@ void HandleEdgeChange(void)
 
     if (new_bit_available)
     {
+        decode_ltc_bit(new_bit);
+
+#if 0
         /* Shift new bit into the 80-bit frame receive buffer */
 
         ltcframe_t* p = (ltcframe_t*)&g_rxFrame;
@@ -451,34 +411,6 @@ void HandleEdgeChange(void)
 
             if (g_rxFrame.sync_word == sync_word_fwd)
             {
-                /* shift bits backwards */
-                int k = 0;
-                const int byte_num_max = LTC_FRAME_BIT_COUNT >> 3;
-
-                for (k=0; k< byte_num_max; k++) {
-                    const unsigned char bi = ((unsigned char*)&g_rxFrame)[k];
-                    unsigned char bo = 0;
-                    bo |= (bi & B8(10000000) ) ? B8(01000000) : 0;
-                    bo |= (bi & B8(01000000) ) ? B8(00100000) : 0;
-                    bo |= (bi & B8(00100000) ) ? B8(00010000) : 0;
-                    bo |= (bi & B8(00010000) ) ? B8(00001000) : 0;
-                    bo |= (bi & B8(00001000) ) ? B8(00000100) : 0;
-                    bo |= (bi & B8(00000100) ) ? B8(00000010) : 0;
-                    bo |= (bi & B8(00000010) ) ? B8(00000001) : 0;
-                    if (k+1 < byte_num_max) {
-                        bo |= ( (((unsigned char*)&g_rxFrame)[k+1]) & B8(00000001) ) ? B8(10000000): B8(00000000);
-                    }
-                    ((unsigned char*)&g_rxFrame)[k] = bo;
-                }
-
-                /* Parse the buffer and get time members in the SMPTE frame */
-                //ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
-
-                g_rxTime.hours = hour(p);       // g_rxFrame.hours_units + g_rxFrame.hours_tens * 10;
-                g_rxTime.mins  = minute(p);     //g_rxFrame.mins_units  + g_rxFrame.mins_tens * 10;
-                g_rxTime.secs  = second(p);     //g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
-                g_rxTime.frame = frame(p);      //g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
-
                 /* Reset the pulse bit counter */
                 g_rxBitCount = 0;
             }
@@ -488,85 +420,138 @@ void HandleEdgeChange(void)
                 g_rxBitCount = 0;
             }
         }
+#endif
     }
+}
+
+
+
+// This is called every time a frame is complete (when bit 79 has been decoded).
+void ltc_frame_complete(void)
+{
+    /* Toggle the LED on each packet received */
+    GPIO_toggle(Board_STAT_LED);
+
+/*
+  if(current_frame_info.frames == 29){
+    out_state_1Hz = !out_state_1Hz;
+    digitalWrite(out_pin_1Hz,out_state_1Hz);
+    Serial.print("1Hz ");
+  }
+
+  out_state_30Hz = !out_state_30Hz;
+  digitalWrite(out_pin_30Hz,out_state_30Hz);
+
+  int elapsed_micros = since_complete;
+
+  digitalWrite(led_pin,!digitalRead(led_pin));
+
+  Serial.printf("%d %02d:%02d:%02d.%02d\n",elapsed_micros, current_frame_info.hours,current_frame_info.minutes,current_frame_info.seconds,current_frame_info.frames);
+  since_complete = 0;
+  */
+}
+
+void decode_ltc_bit(int new_bit)
+{
+    // Shift one bit
+    bit_string = (bit_string << 1);
+
+    // a bit shift adds a zero, if a 1 is needed add 1
+    if (new_bit == 1)
+        bit_string |= 1;
+
+    // if the current_word matches the sync word
+    if ((bit_string & sync_mask) == sync_word_fwd)
+    {
+        bit_string = 0;
+        //since_sync_found = 0;
+        bit_index = -1;         //bit 79
+
+        //a full frame has passed
+        ltc_frame_complete();
+    }
+    else //if (since_sync_found < 33333)
+    {
+        //bit index in LTC message
+        bit_index++;
+
+        //info above bit 60 is ignored.
+        if (bit_index == 60)
+        {
+            //bit string length = index + 1 = 61
+            uint64_t reversed_bit_string = reverse_bit_order(bit_string, 61);
+
+            //see https://en.wikipedia.org/wiki/Linear_timecode
+
+            //This decodes only time info, user fields are ignored
+            g_rxTime.frame = decode_part(reversed_bit_string, 0, 3)   + 10 * decode_part(reversed_bit_string, 8, 9);
+            g_rxTime.secs  = decode_part(reversed_bit_string, 16, 19) + 10 * decode_part(reversed_bit_string, 24, 26);
+            g_rxTime.mins  = decode_part(reversed_bit_string, 32, 35) + 10 * decode_part(reversed_bit_string, 40, 42);
+            g_rxTime.hours = decode_part(reversed_bit_string, 48, 51) + 10 * decode_part(reversed_bit_string, 56, 57);
+
+            bit_string = 0;
+        }
+    }
+}
+
+// Reverses the bit order of the bit string in v, keeping only the given amount
+// of bits
+//
+// Adapted from the code here: http://graphics.stanford.edu/~seander/bithacks.html#BitReverseObvious
+//
+// The following is true:
+//  uint64_t a = 0b0011001;
+//  uint64_t expected_result = 0b1001100;
+//  expected_result==reverse_bit_order(a,7);
+
+uint64_t reverse_bit_order(uint64_t v, int significant_bits)
+{
+    uint64_t r = v;             // r will be reversed bits of v; first get LSB of v
+
+    int s = sizeof(v) * 8 - 1;  // extra shift needed at end
+
+    for (v >>= 1; v; v >>= 1)
+    {
+        r <<= 1;
+        r |= v & 1;
+        s--;
+    }
+
+    r <<= s;
+
+  return r >> (64 - significant_bits);
+}
+
+// Decode a part of a bit string in word_value
+// The value of bit string starting at start_bit to and incliding stop_bit is returned.
+//
+// The following is true:
+//  uint64_t a = 0b1011001;
+//  uint64_t expected_result = 0b1011;
+//  expected_result == decode_part(a,3,6);
+
+int decode_part(uint64_t bit_string, int start_bit,int stop_bit)
+{
+  // This shift puts the start bit on the first place
+  uint64_t shifted_bit_string = bit_string >> start_bit;
+
+  // Create a bit-mask of the required length
+  // including stop bit so add 1
+  int bit_string_slice_length = stop_bit - start_bit + 1;
+  uint64_t bit_mask = (1<<bit_string_slice_length) - 1;
+
+  // Apply the mask, effectively ignoring all other bits
+  uint64_t masked_bit_string = shifted_bit_string & bit_mask;
+
+  return  (int) masked_bit_string;
 }
 
 //*****************************************************************************
 //
 //*****************************************************************************
 
-int hour(ltcframe_t* ltc)
-{
-    return 10 * ((int) (ltc->data >> 56) & 0x03)  + ((int) (ltc->data >> 48) & 0x0f);
-}
-
-int minute(ltcframe_t* ltc)
-{
-    return 10 * ((int) (ltc->data >> 40) & 0x07)  + ((int) (ltc->data >> 32) & 0x0f);
-}
-
-int second(ltcframe_t* ltc)
-{
-    return 10 * ((int) (ltc->data >> 24) & 0x07)  + ((int) (ltc->data >> 16) & 0x0f);
-}
-
-int frame(ltcframe_t* ltc)
-{
-    return 10 * ((int) (ltc->data >>  8) & 0x03)  + ((int) (ltc->data >>  0) & 0x0f);
-}
-
-bool bit10(ltcframe_t* ltc)
-{
-    return (int) (ltc->data >> 10) & 0x01;
-}
-
-bool bit11(ltcframe_t* ltc)
-{
-    return (int) (ltc->data >> 11) & 0x01;
-}
-
-bool bit27(ltcframe_t* ltc)
-{
-    return (int) (ltc->data >> 27) & 0x01;
-}
-
-bool bit43(ltcframe_t* ltc)
-{
-    return (int) (ltc->data >> 43) & 0x01;
-}
-
-bool bit58(ltcframe_t* ltc)
-{
-    return (int) (ltc->data >> 58) & 0x01;
-}
-
-bool bit59(ltcframe_t* ltc)
-{
-    return (int) (ltc->data >> 59) & 0x01;
-}
-
-uint32_t userdata(ltcframe_t * ltc)
-{
-    return  ((int) (ltc->data >>  4) & 0x0000000fUL) | ((int) (ltc->data >>  8) & 0x000000f0UL) |
-            ((int) (ltc->data >> 12) & 0x00000f00UL) | ((int) (ltc->data >> 16) & 0x0000f000UL) |
-            ((int) (ltc->data >> 20) & 0x000f0000UL) | ((int) (ltc->data >> 24) & 0x00f00000UL) |
-            ((int) (ltc->data >> 28) & 0x0f000000UL) | ((int) (ltc->data >> 32) & 0xf0000000UL);
-}
-
-
 
 #if 0
-
-void LTC_SMPTE::parse_code()
-{
-    frame = (code[1] & 0x03) * 10 + (code[0] & 0x0f);
-    sec   = (code[3] & 0x07) * 10 + (code[2] & 0x0f);
-    min   = (code[5] & 0x07) * 10 + (code[4] & 0x0f);
-    hour  = (code[7] & 0x03) * 10 + (code[6] & 0x0f);
-    drop  = code[1] & (1<<2) ? 1 : 0;
-    received = 1;
-}
-
 handleInterrupt() {
   noInterrupts(); // stop being interrupted (got to hurry not to miss the next one)
   long time = micros(); // record curent time (in micro-seconds)
@@ -581,7 +566,6 @@ handleInterrupt() {
      long average = duration; // average time for a one (short)
   }
 }
-
 #endif
 
 /* End-Of-File */

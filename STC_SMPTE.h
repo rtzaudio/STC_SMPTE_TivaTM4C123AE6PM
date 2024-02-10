@@ -130,16 +130,5 @@ int SMPTE_Decoder_Stop(void);
 void SMPTE_Decoder_Reset(void);
 Void WTimer0AIntHandler(UArg arg);
 Void WTimer0BIntHandler(UArg arg);
-int hour(ltcframe_t* ltc);
-int minute(ltcframe_t* ltc);
-int second(ltcframe_t* ltc);
-int frame(ltcframe_t* ltc);
-bool bit10(ltcframe_t* ltc);
-bool bit11(ltcframe_t* ltc);
-bool bit27(ltcframe_t* ltc);
-bool bit43(ltcframe_t* ltc);
-bool bit58(ltcframe_t* ltc);
-bool bit59(ltcframe_t* ltc);
-uint32_t userdata(ltcframe_t * ltc);
 
 /* End-Of-File */
