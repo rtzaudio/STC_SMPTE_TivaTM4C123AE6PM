@@ -368,9 +368,9 @@ void HandleEdgeChange(void)
 
     if (new_bit_available)
     {
-        decode_ltc_bit(new_bit);
+        //decode_ltc_bit(new_bit);
 
-#if 0
+#if 1
         /* Shift new bit into the 80-bit frame receive buffer */
 
         ltcframe_t* p = (ltcframe_t*)&g_rxFrame;
@@ -411,6 +411,15 @@ void HandleEdgeChange(void)
 
             if (g_rxFrame.sync_word == sync_word_fwd)
             {
+                //bit string length = index + 1 = 61
+                uint64_t reversed_bit_string = reverse_bit_order(w64, 61);
+
+                //This decodes only time info, user fields are ignored
+                g_rxTime.frame = decode_part(reversed_bit_string, 0, 3)   + 10 * decode_part(reversed_bit_string, 8, 9);
+                g_rxTime.secs  = decode_part(reversed_bit_string, 16, 19) + 10 * decode_part(reversed_bit_string, 24, 26);
+                g_rxTime.mins  = decode_part(reversed_bit_string, 32, 35) + 10 * decode_part(reversed_bit_string, 40, 42);
+                g_rxTime.hours = decode_part(reversed_bit_string, 48, 51) + 10 * decode_part(reversed_bit_string, 56, 57);
+
                 /* Reset the pulse bit counter */
                 g_rxBitCount = 0;
             }
@@ -507,7 +516,6 @@ void decode_ltc_bit(int new_bit)
 uint64_t reverse_bit_order(uint64_t v, int significant_bits)
 {
     uint64_t r = v;             // r will be reversed bits of v; first get LSB of v
-
     int s = sizeof(v) * 8 - 1;  // extra shift needed at end
 
     for (v >>= 1; v; v >>= 1)
@@ -519,11 +527,11 @@ uint64_t reverse_bit_order(uint64_t v, int significant_bits)
 
     r <<= s;
 
-  return r >> (64 - significant_bits);
+    return r >> (64 - significant_bits);
 }
 
 // Decode a part of a bit string in word_value
-// The value of bit string starting at start_bit to and incliding stop_bit is returned.
+// The value of bit string starting at start_bit to and including stop_bit is returned.
 //
 // The following is true:
 //  uint64_t a = 0b1011001;
@@ -538,12 +546,13 @@ int decode_part(uint64_t bit_string, int start_bit,int stop_bit)
   // Create a bit-mask of the required length
   // including stop bit so add 1
   int bit_string_slice_length = stop_bit - start_bit + 1;
+
   uint64_t bit_mask = (1<<bit_string_slice_length) - 1;
 
   // Apply the mask, effectively ignoring all other bits
   uint64_t masked_bit_string = shifted_bit_string & bit_mask;
 
-  return  (int) masked_bit_string;
+  return  (int)masked_bit_string;
 }
 
 //*****************************************************************************
