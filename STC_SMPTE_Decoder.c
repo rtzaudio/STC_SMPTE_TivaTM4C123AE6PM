@@ -114,15 +114,12 @@ SMPTETimecode g_rxTime;
 LTCFrame g_rxFrame;
 bool g_decoderEnabled = false;
 
-volatile uint32_t g_ui32HighPeriod = 0;
-volatile uint32_t g_ui32HighStartCount = 0;
-volatile uint32_t g_ui32HighEndCount = 0;
-volatile uint32_t g_ui32PeriodAvg = 0;
+volatile uint32_t g_uiPeriod = 0;
+volatile uint32_t g_uiHighCount = 0;
+volatile uint32_t g_uiLowCount = 0;
+volatile uint32_t g_uiAveragePeriod = 0;
 
-volatile int g_oneflg = 0;
 volatile int g_rxBitCount = 0;
-volatile int g_drop = 0;
-volatile int g_fps = 0;
 
 volatile bool first_transition = false;
 volatile int new_bit = 0;
@@ -130,10 +127,11 @@ volatile int new_bit = 0;
 //the sync word is available in bit 64 - 79,
 //see https://en.wikipedia.org/wiki/Linear_timecode
 
-const uint64_t sync_word = 0b0011111111111101;
+const uint64_t sync_word_fwd = 0b0011111111111101;
 const uint64_t sync_word_rev = 0b1011111111111100;
-
 const uint64_t sync_mask = 0b1111111111111111;
+
+static void HandleEdgeChange(void);
 
 //*****************************************************************************
 //********************** SMPTE DECODER SUPPORT ********************************
@@ -182,10 +180,9 @@ int SMPTE_Decoder_Start(void)
     memset(&g_rxTime, 0, sizeof(g_rxTime));
 
     /* Reset global variables */
-    g_oneflg = g_rxBitCount = g_drop = g_fps = 0;
-
-    first_transition = false;
+    g_rxBitCount = 0;
     new_bit = 0;
+    first_transition = false;
 
     /* Reset the frame buffer */
     ltc_frame_reset(&g_rxFrame);
@@ -281,49 +278,39 @@ Void WTimer0AIntHandler(UArg arg)
     /* Clear the timer interrupt */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
 
-    /* Store the end time.  In Edge Time Mode, the prescaler is used for the
-     * the most significant bits.  Therefore, it must be shifted by 16 before
-     * being added onto the final value.
-     */
-    g_ui32HighStartCount = TimerValueGet(WTIMER0_BASE, TIMER_A);  // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_A) << 32);
+    /* Store the start time */
+    g_uiHighCount = TimerValueGet(WTIMER0_BASE, TIMER_A);
+
+    HandleEdgeChange();
 }
 
 /* Falling Edge Interrupt (End of Pulse) */
 Void WTimer0BIntHandler(UArg arg)
 {
-    uint32_t t;
-    bool new_bit_available = false;
-
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
 
     /* Clear the timer interrupt */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
 
-    /* Store the end time.  In Edge Time Mode, the prescaler is used for the
-     * the most significant bits.  Therefore, it must be shifted by 16 before
-     * being added onto the final value.
-     */
-    g_ui32HighEndCount = TimerValueGet(WTIMER0_BASE, TIMER_B);    // + (TimerPrescaleGet(WTIMER0_BASE, TIMER_B) << 32);
+    /* Store the end time */
+    g_uiLowCount = TimerValueGet(WTIMER0_BASE, TIMER_B);
 
-    /* Simple check to avoid overflow cases.  The End Count is the
-     * second measurement taken and therefore should never be smaller
-     * than the Start Count unless the timer has overflowed.  If that
-     * occurs, then add 2^16-1 to the End Count before subtraction.
-     */
-    if (g_ui32HighEndCount > g_ui32HighStartCount)
-    {
-        g_ui32HighPeriod = g_ui32HighEndCount - g_ui32HighStartCount;
-    }
+    HandleEdgeChange();
+}
+
+//*****************************************************************************
+//
+//*****************************************************************************
+
+void HandleEdgeChange(void)
+{
+    uint32_t t;
+    bool new_bit_available = false;
+
+    if (g_uiLowCount > g_uiHighCount)
+        g_uiPeriod = g_uiLowCount - g_uiHighCount;
     else
-    {
-        //g_ui32HighPeriod = (uint32_t)(((uint64_t)g_ui32HighEndCount + 16777215) - (uint64_t)g_ui32HighStartCount);
-        //g_ui32HighPeriod = g_ui32HighStartCount - g_ui32HighEndCount;
-
-        /* Either it was an overflow or the rising edge was missed.
-         * So, we just ignore this edge interrupt and return.
-         */
-        return;
-    }
+        g_uiPeriod = g_uiHighCount - g_uiLowCount;
 
     /* We've now interrupted on the falling edge and can calculate the
      * pulse width time in microseconds by dividing t period count by 80.
@@ -337,13 +324,13 @@ Void WTimer0BIntHandler(UArg arg)
      */
 
     /* Calculate the average pulse period */
-    g_ui32PeriodAvg = (g_ui32HighPeriod >> 2);
+    g_uiAveragePeriod = (g_uiPeriod >> 2);
 
     /* Normally we'd divide the period count by 80 here to get the pulse
      * time in microseconds. However, we scale all the other timing
      * constants by 80 instead to avoid this divison.
      */
-    t  = g_ui32HighPeriod;
+    t  = g_uiPeriod;
 
     /* Now look at the period and decide if it's a one or zero */
     if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
@@ -416,7 +403,7 @@ Void WTimer0BIntHandler(UArg arg)
             /* Toggle the LED on each packet received */
             GPIO_toggle(Board_STAT_LED);
 
-            if (g_rxFrame.sync_word == sync_word)
+            if (g_rxFrame.sync_word == sync_word_fwd)
             {
                 /* Parse the buffer and get time members in the SMPTE frame */
                 //ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);

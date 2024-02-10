@@ -70,7 +70,7 @@ typedef struct ltcframe_t {
  * pulse width: 416.7us(30fps)
  * 80bit x 30frame/s --> 416.7us/bit
  */
-#define MAX_DELTA                   20  /* was 15 */
+#define MAX_DELTA                   15
 #define EXPECTED_DURATION_SINGLE    208
 #define EXPECTED_DURATION_DOUBLE    (EXPECTED_DURATION_SINGLE * 2)
 
