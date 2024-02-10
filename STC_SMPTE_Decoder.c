@@ -105,6 +105,57 @@
 #include "STC_SMPTE_SPI.h"
 #include "libltc\ltc.h"
 
+/** turn a numeric literal into a hex constant
+ *  (avoids problems with leading zeroes)
+ *  8-bit constants max value 0x11111111, always fits in unsigned long
+ */
+#define HEX__(n) 0x##n##LU
+
+/**
+ * 8-bit conversion function
+ */
+#define B8__(x) ((x&0x0000000FLU)?1:0)  \
+    +((x&0x000000F0LU)?2:0)  \
+    +((x&0x00000F00LU)?4:0)  \
+    +((x&0x0000F000LU)?8:0)  \
+    +((x&0x000F0000LU)?16:0) \
+    +((x&0x00F00000LU)?32:0) \
+    +((x&0x0F000000LU)?64:0) \
+    +((x&0xF0000000LU)?128:0)
+
+/** for upto 8-bit binary constants */
+#define B8(d) ((unsigned char)B8__(HEX__(d)))
+
+/** for upto 16-bit binary constants, MSB first */
+#define B16(dmsb,dlsb) (((unsigned short)B8(dmsb)<<8) + B8(dlsb))
+
+/** turn a numeric literal into a hex constant
+ *(avoids problems with leading zeroes)
+ * 8-bit constants max value 0x11111111, always fits in unsigned long
+ */
+#define HEX__(n) 0x##n##LU
+
+/** 8-bit conversion function */
+#define B8__(x) ((x&0x0000000FLU)?1:0)  \
+    +((x&0x000000F0LU)?2:0)  \
+    +((x&0x00000F00LU)?4:0)  \
+    +((x&0x0000F000LU)?8:0)  \
+    +((x&0x000F0000LU)?16:0) \
+    +((x&0x00F00000LU)?32:0) \
+    +((x&0x0F000000LU)?64:0) \
+    +((x&0xF0000000LU)?128:0)
+
+/** for upto 8-bit binary constants */
+#define B8(d) ((unsigned char)B8__(HEX__(d)))
+
+/** for upto 16-bit binary constants, MSB first */
+#define B16(dmsb,dlsb) (((unsigned short)B8(dmsb)<<8) + B8(dlsb))
+
+/* Example usage:
+ * B8(01010101) = 85
+ * B16(10101010,01010101) = 43605
+ */
+
 /* Constants and Macros */
 extern SYSCFG g_cfg;
 extern  uint32_t g_systemClock;
@@ -389,26 +440,44 @@ void HandleEdgeChange(void)
         p->data = w64;
         p->sync = w16;
 
-        g_rxBitCount++;
-
-        /* Must see the SMPTE sync word at the end of frame to consider it a
-         * valid packet. If so, we parse out the frame members into our buffer.
+        /* Must see the SMPTE sync word at the end of frame to consider it a valid
+         * packet. Parse out the frame members into our buffer if sync word found.
          */
 
-        if (g_rxBitCount >= LTC_FRAME_BIT_COUNT)
+        if (++g_rxBitCount >= LTC_FRAME_BIT_COUNT)
         {
             /* Toggle the LED on each packet received */
             GPIO_toggle(Board_STAT_LED);
 
             if (g_rxFrame.sync_word == sync_word_fwd)
             {
+                /* shift bits backwards */
+                int k = 0;
+                const int byte_num_max = LTC_FRAME_BIT_COUNT >> 3;
+
+                for (k=0; k< byte_num_max; k++) {
+                    const unsigned char bi = ((unsigned char*)&g_rxFrame)[k];
+                    unsigned char bo = 0;
+                    bo |= (bi & B8(10000000) ) ? B8(01000000) : 0;
+                    bo |= (bi & B8(01000000) ) ? B8(00100000) : 0;
+                    bo |= (bi & B8(00100000) ) ? B8(00010000) : 0;
+                    bo |= (bi & B8(00010000) ) ? B8(00001000) : 0;
+                    bo |= (bi & B8(00001000) ) ? B8(00000100) : 0;
+                    bo |= (bi & B8(00000100) ) ? B8(00000010) : 0;
+                    bo |= (bi & B8(00000010) ) ? B8(00000001) : 0;
+                    if (k+1 < byte_num_max) {
+                        bo |= ( (((unsigned char*)&g_rxFrame)[k+1]) & B8(00000001) ) ? B8(10000000): B8(00000000);
+                    }
+                    ((unsigned char*)&g_rxFrame)[k] = bo;
+                }
+
                 /* Parse the buffer and get time members in the SMPTE frame */
                 //ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
 
                 g_rxTime.hours = hour(p);       // g_rxFrame.hours_units + g_rxFrame.hours_tens * 10;
-                g_rxTime.mins  = minute(p);    //g_rxFrame.mins_units  + g_rxFrame.mins_tens * 10;
-                g_rxTime.secs  = second(p);    //g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
-                g_rxTime.frame = frame(p);  //g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
+                g_rxTime.mins  = minute(p);     //g_rxFrame.mins_units  + g_rxFrame.mins_tens * 10;
+                g_rxTime.secs  = second(p);     //g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
+                g_rxTime.frame = frame(p);      //g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
 
                 /* Reset the pulse bit counter */
                 g_rxBitCount = 0;
