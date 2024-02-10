@@ -397,8 +397,6 @@ void HandleEdgeChange(void)
 
         if (g_rxBitCount >= LTC_FRAME_BIT_COUNT)
         {
-            //g_rxBitCount = 0;
-
             /* Toggle the LED on each packet received */
             GPIO_toggle(Board_STAT_LED);
 
@@ -407,10 +405,10 @@ void HandleEdgeChange(void)
                 /* Parse the buffer and get time members in the SMPTE frame */
                 //ltc_frame_to_time(&g_rxTime, &g_rxFrame, 0);
 
-                g_rxTime.hours = g_rxFrame.hours_units + g_rxFrame.hours_tens * 10;
-                g_rxTime.mins  = g_rxFrame.mins_units  + g_rxFrame.mins_tens * 10;
-                g_rxTime.secs  = g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
-                g_rxTime.frame = g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
+                g_rxTime.hours = hour(p);       // g_rxFrame.hours_units + g_rxFrame.hours_tens * 10;
+                g_rxTime.mins  = minute(p);    //g_rxFrame.mins_units  + g_rxFrame.mins_tens * 10;
+                g_rxTime.secs  = second(p);    //g_rxFrame.secs_units  + g_rxFrame.secs_tens * 10;
+                g_rxTime.frame = frame(p);  //g_rxFrame.frame_units + g_rxFrame.frame_tens * 10;
 
                 /* Reset the pulse bit counter */
                 g_rxBitCount = 0;
