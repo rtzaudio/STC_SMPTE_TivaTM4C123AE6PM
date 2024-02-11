@@ -408,6 +408,7 @@ Void WTimer0AHwi(UArg arg)
     /* Store the start time */
     g_uiHighCount = TimerValueGet(WTIMER0_BASE, TIMER_A);
 
+    /* Call the edge change interrupt handler */
     HandleEdgeChange();
 }
 
@@ -423,6 +424,7 @@ Void WTimer0BHwi(UArg arg)
     /* Store the end time */
     g_uiLowCount = TimerValueGet(WTIMER0_BASE, TIMER_B);
 
+    /* Call the edge change interrupt handler */
     HandleEdgeChange();
 }
 
