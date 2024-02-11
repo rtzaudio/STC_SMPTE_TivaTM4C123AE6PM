@@ -153,7 +153,7 @@ static Void WTimer0AHwi(UArg arg);
 static Void WTimer0BHwi(UArg arg);
 static void HandleEdgeChange(void);
 
-static int decode_part(uint64_t bit_string, int start_bit,int stop_bit);
+static uint8_t decode_part(uint64_t bit_string, int start_bit, int stop_bit);
 static uint64_t reverse_bit_order(uint64_t v, int significant_bits);
 
 //*****************************************************************************
@@ -240,14 +240,12 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Toggle the LED on each packet received */
         GPIO_toggle(Board_STAT_LED);
 
-        //bit string length = index + 1 = 61
         //uint64_t reversed_bit_string = reverse_bit_order(word, 61);
 
-        //This decodes only time info, user fields are ignored
-        //g_rxTime.frame = decode_part(reversed_bit_string, 0, 3)   + 10 * decode_part(reversed_bit_string, 8, 9);
-        //g_rxTime.secs  = decode_part(reversed_bit_string, 16, 19) + 10 * decode_part(reversed_bit_string, 24, 26);
-        //g_rxTime.mins  = decode_part(reversed_bit_string, 32, 35) + 10 * decode_part(reversed_bit_string, 40, 42);
-        //g_rxTime.hours = decode_part(reversed_bit_string, 48, 51) + 10 * decode_part(reversed_bit_string, 56, 57);
+        g_rxTime.frame = decode_part(word.raw.data, 0, 3)   + (decode_part(word.raw.data, 8, 9) * 10);
+        g_rxTime.secs  = decode_part(word.raw.data, 16, 19) + (decode_part(word.raw.data, 24, 26) * 10);
+        g_rxTime.mins  = decode_part(word.raw.data, 32, 35) + (decode_part(word.raw.data, 40, 42) * 10);
+        g_rxTime.hours = decode_part(word.raw.data, 48, 51) + (decode_part(word.raw.data, 56, 57) * 10);
     }
 }
 
@@ -579,21 +577,24 @@ uint64_t reverse_bit_order(uint64_t v, int significant_bits)
 //  uint64_t expected_result = 0b1011;
 //  expected_result == decode_part(a,3,6);
 
-int decode_part(uint64_t bit_string, int start_bit,int stop_bit)
+uint8_t decode_part(uint64_t bit_string, int start_bit, int stop_bit)
 {
   // This shift puts the start bit on the first place
+
   uint64_t shifted_bit_string = bit_string >> start_bit;
 
   // Create a bit-mask of the required length
   // including stop bit so add 1
+
   int bit_string_slice_length = stop_bit - start_bit + 1;
 
-  uint64_t bit_mask = (1<<bit_string_slice_length) - 1;
+  uint64_t bit_mask = (1 << bit_string_slice_length) - 1;
 
   // Apply the mask, effectively ignoring all other bits
+
   uint64_t masked_bit_string = shifted_bit_string & bit_mask;
 
-  return  (int)masked_bit_string;
+  return (uint8_t)masked_bit_string;
 }
 
 //*****************************************************************************
