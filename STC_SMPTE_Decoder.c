@@ -104,12 +104,15 @@
 #include "STC_SMPTE_SPI.h"
 #include "libltc\ltc.h"
 
+/*** Data Types and Constants ***/
+
 /* SMPTE 80-bit frame buffer */
 typedef struct ltcframe_t {
     uint64_t data;              /* 64-bits data */
     uint16_t sync;              /* 16-bits sync */
 } ltcframe_t;                   /* 80-bit frame */
 
+/* Access as struct members or raw bit form */
 typedef union LTCFrameWord_t {
     LTCFrame    ltc;            /* members form */
     ltcframe_t  raw;            /* raw bit form */
@@ -124,13 +127,11 @@ volatile uint32_t g_uiHighCount = 0;
 volatile uint32_t g_uiLowCount = 0;
 volatile uint32_t g_uiAveragePeriod = 0;
 volatile uint32_t g_rxBitCount = 0;
-
-volatile bool first_transition = false;
-volatile int new_bit = 0;
+volatile int32_t  g_nBitState = 0;
+volatile bool     g_bFirstTransition = false;
 
 const uint64_t sync_word_fwd = 0b0011111111111101;
 const uint64_t sync_word_rev = 0b1011111111111100;
-const uint64_t sync_mask = 0b1111111111111111;
 
 /* Hwi_Struct for timer interrupt handlers */
 static Hwi_Struct wtimer0AHwiStruct;
@@ -138,8 +139,7 @@ static Hwi_Struct wtimer0BHwiStruct;
 
 static Mailbox_Handle mailboxWord = NULL;
 
-static SMPTETimecode g_rxTime;
-static ltcframe_t smpte_word;
+static ltcframe_t g_smpteWord;
 
 /*** External Data Items ***/
 
@@ -153,8 +153,7 @@ static Void WTimer0AHwi(UArg arg);
 static Void WTimer0BHwi(UArg arg);
 static void HandleEdgeChange(void);
 
-//static uint8_t decode_part(uint64_t bit_string, int start_bit, int stop_bit);
-static uint64_t reverse_bit_order(uint64_t v, int significant_bits);
+static uint64_t reverseBits64(uint64_t x);
 
 //*****************************************************************************
 //********************** SMPTE DECODER SUPPORT ********************************
@@ -231,10 +230,18 @@ uint64_t reverseBits64(uint64_t x)
     return x;
 }
 
+//*****************************************************************************
+// This task decodes 80-bit SMPTE packets fed to it from the edge interrupt
+// handlers. Once a valid packet sync word is found in the stream, the 64-bit
+// word is passed to this task to extract and decode all the time and other
+// information to provide the main SPI host task with the time code
+// information needed via an SPI interrupt.
+//*****************************************************************************
+
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
     uint8_t secs = 0;
-
+    SMPTETimecode tc;
     LTCFrameWord word;
 
     /* Initialize and start edge decode interrupts */
@@ -257,22 +264,19 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         GPIO_toggle(Board_STAT_LED);
 
         /* Reverse all 64-bits in the frame */
-        uint64_t w = reverseBits64(word.raw.data);
+        word.raw.data = reverseBits64(word.raw.data);
 
-        word.raw.data = w;
+        /* Now extract any time and other data from the packet */
+        tc.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
+        tc.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
+        tc.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
+        tc.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
 
-        g_rxTime.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
-        g_rxTime.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
-        g_rxTime.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
-        g_rxTime.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
-
-        if (secs != g_rxTime.secs)
+        if (secs != tc.secs)
         {
-            secs = g_rxTime.secs;
+            secs = tc.secs;
 
-            System_printf("%2u:%2u:%2u:%2u\n",
-                          g_rxTime.hours, g_rxTime.mins,
-                          g_rxTime.secs, g_rxTime.frame);
+            System_printf("%2u:%2u:%2u:%2u\n", tc.hours, tc.mins, tc.secs, tc.frame);
             System_flush();
         }
     }
@@ -284,19 +288,16 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
 
 Void SMPTE_Decoder_Reset(void)
 {
-    /* Zero out the starting time struct */
-    memset(&g_rxTime, 0, sizeof(g_rxTime));
+    g_smpteWord.data = (uint64_t)0;
+    g_smpteWord.sync = (uint16_t)0;
 
-    smpte_word.data = (uint64_t)0;
-    smpte_word.sync = (uint16_t)0;
+    g_nBitState = 0;
+    g_bFirstTransition = false;
 
-    first_transition = false;
-    new_bit = 0;
-
-    g_rxBitCount = 0;
-    g_uiPeriod = 0;
-    g_uiLowCount = 0;
+    g_uiPeriod    = 0;
+    g_uiLowCount  = 0;
     g_uiHighCount = 0;
+    g_rxBitCount  = 0;
 }
 
 //*****************************************************************************
@@ -432,91 +433,82 @@ Void WTimer0BHwi(UArg arg)
 
 void HandleEdgeChange(void)
 {
-    uint32_t t;
-    bool new_bit_available = false;
+    bool new_bit_flag = false;
 
+    /* Calculate the pulse period from rising edge to falling edge */
     if (g_uiLowCount > g_uiHighCount)
         g_uiPeriod = g_uiLowCount - g_uiHighCount;
     else
         g_uiPeriod = g_uiHighCount - g_uiLowCount;
-
-    /*  pulse width: 416.7us(30fps)
-     *  0-bit x 30fps --> 416.7us/bit
-     *
-     * Then compare with average lenth of a one bit (haveing some margin
-     * of at least of 1/4 of average, finally decide if it is a
-     * long (0) or a short (1)
-     */
 
     /* Calculate the average pulse period */
     g_uiAveragePeriod = (g_uiPeriod >> 2);
 
     /* Normally we'd divide the period count by 80 here to get the pulse
      * time in microseconds. However, we scale all the other timing
-     * constants by 80 instead to avoid this divison.
+     * constants by 80 instead to avoid this divison. Now look at the
+     * period and decide if the bit is a one or zero.
      */
-    t  = g_uiPeriod;
-
-    /* Now look at the period and decide if it's a one or zero */
-    if (t >= ONE_TIME_MIN && t < ONE_TIME_MAX)
+    if ((g_uiPeriod >= ONE_TIME_MIN) && (g_uiPeriod < ONE_TIME_MAX))
     {
-        if (first_transition)
+        if (g_bFirstTransition)
         {
             /* First bit transition */
-            first_transition = false;
+            g_bFirstTransition = false;
         }
         else
         {
             // Second bit transition
-            first_transition = true;
-            new_bit_available = true;
-            new_bit = 1;
+            g_nBitState = 1;
+            g_bFirstTransition = true;
+            new_bit_flag = true;
         }
     }
-    else if (t >= ZERO_TIME_MIN && t < ZERO_TIME_MAX)
+    else if ((g_uiPeriod >= ZERO_TIME_MIN) && (g_uiPeriod < ZERO_TIME_MAX))
     {
-        new_bit_available = true;
-        first_transition = true;
-        new_bit = 0;
+        g_nBitState = 0;
+        g_bFirstTransition = true;
+        new_bit_flag = true;
     }
     else
     {
-        //first bit change? or something is wrong!
+        /* Either it's the first bit change, or data timing is wrong! */
+        new_bit_flag = false;
     }
 
-    if (new_bit_available)
+    if (new_bit_flag)
     {
         /* Shift the 16-bit sync word bits */
-        smpte_word.sync = smpte_word.sync << 1;
+        g_smpteWord.sync = g_smpteWord.sync << 1;
 
         /* Carry bit-63 into sync bit-0 if needed, otherwise it's a zero bit */
-        if (smpte_word.data & 0x8000000000000000)
-            smpte_word.sync |= 1;
+        if (g_smpteWord.data & 0x8000000000000000)
+            g_smpteWord.sync |= 1;
 
         /* Shift the 80-bit frame word bits */
-        smpte_word.data = smpte_word.data << 1;
+        g_smpteWord.data = g_smpteWord.data << 1;
 
         /* Add in new smpte word bit, either zero or a one */
-        if (new_bit)
-            smpte_word.data |= 1;
+        if (g_nBitState)
+            g_smpteWord.data |= 1;
 
         /* The 16-bit SMPTE sync word must be at the end of the frame
          * to consider it a valid 80-bit SMPTE frame.
          */
         if (++g_rxBitCount >= LTC_FRAME_BIT_COUNT)
         {
-            if (smpte_word.sync == sync_word_fwd)
+            if (g_smpteWord.sync == sync_word_fwd)
             {
                 /* Post the 64-bit SMPTE word to decode task */
-                Mailbox_post(mailboxWord, &smpte_word, BIOS_NO_WAIT);
+                Mailbox_post(mailboxWord, &g_smpteWord, BIOS_NO_WAIT);
 
                 /* Reset bit counter and buffer */
                 g_rxBitCount = 0;
             }
-            else if (smpte_word.sync == sync_word_rev)
+            else if (g_smpteWord.sync == sync_word_rev)
             {
                 /* Post the 64-bit SMPTE word to decode task */
-                Mailbox_post(mailboxWord, &smpte_word, BIOS_NO_WAIT);
+                Mailbox_post(mailboxWord, &g_smpteWord, BIOS_NO_WAIT);
 
                 /* Reset bit counter and buffer */
                 g_rxBitCount = 0;
@@ -524,102 +516,5 @@ void HandleEdgeChange(void)
         }
     }
 }
-
-
-#if 0
-uint64_t kbitreverse (uint64_t n)
-{
-  static const uint64_t m0 = 0x5555555555555555LLU;
-  static const uint64_t m1 = 0x0300c0303030c303LLU;
-  static const uint64_t m2 = 0x00c0300c03f0003fLLU;
-  static const uint64_t m3 = 0x00000ffc00003fffLLU;
-  n = ((n>>1)&m0) | (n&m0)<<1;
-  n = swapbits<uint64_t, m1, 4>(n);
-  n = swapbits<uint64_t, m2, 8>(n);
-  n = swapbits<uint64_t, m3, 20>(n);
-  n = (n >> 34) | (n << 30);
-  return n;
-}
-#endif
-
-// Reverses the bit order of the bit string in v, keeping only the given amount
-// of bits
-//
-// Adapted from the code here: http://graphics.stanford.edu/~seander/bithacks.html#BitReverseObvious
-//
-// The following is true:
-//  uint64_t a = 0b0011001;
-//  uint64_t expected_result = 0b1001100;
-//  expected_result==reverse_bit_order(a,7);
-
-#if 0
-uint64_t reverse_bit_order(uint64_t v, int significant_bits)
-{
-    uint64_t r = v;             // r will be reversed bits of v; first get LSB of v
-    int s = sizeof(v) * 8 - 1;  // extra shift needed at end
-
-    for (v >>= 1; v; v >>= 1)
-    {
-        r <<= 1;
-        r |= v & 1;
-        s--;
-    }
-
-    r <<= s;
-
-    return r >> (64 - significant_bits);
-}
-
-// Decode a part of a bit string in word_value
-// The value of bit string starting at start_bit to and including stop_bit is returned.
-//
-// The following is true:
-//  uint64_t a = 0b1011001;
-//  uint64_t expected_result = 0b1011;
-//  expected_result == decode_part(a,3,6);
-
-
-uint8_t decode_part(uint64_t bit_string, int start_bit, int stop_bit)
-{
-  // This shift puts the start bit on the first place
-
-  uint64_t shifted_bit_string = bit_string >> start_bit;
-
-  // Create a bit-mask of the required length
-  // including stop bit so add 1
-
-  int bit_string_slice_length = stop_bit - start_bit + 1;
-
-  uint64_t bit_mask = (1 << bit_string_slice_length) - 1;
-
-  // Apply the mask, effectively ignoring all other bits
-
-  uint64_t masked_bit_string = shifted_bit_string & bit_mask;
-
-  return (uint8_t)masked_bit_string;
-}
-#endif
-
-//*****************************************************************************
-//
-//*****************************************************************************
-
-
-#if 0
-handleInterrupt() {
-  noInterrupts(); // stop being interrupted (got to hurry not to miss the next one)
-  long time = micros(); // record curent time (in micro-seconds)
-  duration = time - lastTime; // Get the duration from the last interrupt
-  ...
-  compare with average lenth of a one (have some margin at least of 1/4 of average - see further)
-  (Calculate 1/4 by bit shifting to be quick).
-  decide if it is a long (0) or a short (1)
-  ...
-  lastTime = time;
-  if is was a one {
-     long average = duration; // average time for a one (short)
-  }
-}
-#endif
 
 /* End-Of-File */
