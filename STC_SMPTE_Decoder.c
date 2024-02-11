@@ -468,6 +468,7 @@ void HandleEdgeChange(void)
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
     uint64_t word;
+    LTCFrame frame;
 
     /* Reset decoder buffers */
     SMPTE_Decoder_Reset();
@@ -482,7 +483,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
     while (true)
     {
         /* Wait for a 64-bit timecode word */
-        if (!Mailbox_pend(mailboxWord, &word, BIOS_WAIT_FOREVER))
+        if (!Mailbox_pend(mailboxWord, &word, 100))
         {
             GPIO_write(Board_STAT_LED, Board_LED_ON);
             continue;
@@ -491,14 +492,21 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Toggle the LED on each packet received */
         GPIO_toggle(Board_STAT_LED);
 
+        memcpy(&frame, &word, sizeof(word));
+
+        frame.sync_word = 0;
+
         //bit string length = index + 1 = 61
         uint64_t reversed_bit_string = reverse_bit_order(word, 61);
 
         //This decodes only time info, user fields are ignored
-        g_rxTime.frame = decode_part(reversed_bit_string, 0, 3)   + 10 * decode_part(reversed_bit_string, 8, 9);
-        g_rxTime.secs  = decode_part(reversed_bit_string, 16, 19) + 10 * decode_part(reversed_bit_string, 24, 26);
-        g_rxTime.mins  = decode_part(reversed_bit_string, 32, 35) + 10 * decode_part(reversed_bit_string, 40, 42);
-        g_rxTime.hours = decode_part(reversed_bit_string, 48, 51) + 10 * decode_part(reversed_bit_string, 56, 57);
+        //g_rxTime.frame = decode_part(reversed_bit_string, 0, 3)   + 10 * decode_part(reversed_bit_string, 8, 9);
+        //g_rxTime.secs  = decode_part(reversed_bit_string, 16, 19) + 10 * decode_part(reversed_bit_string, 24, 26);
+        //g_rxTime.mins  = decode_part(reversed_bit_string, 32, 35) + 10 * decode_part(reversed_bit_string, 40, 42);
+        //g_rxTime.hours = decode_part(reversed_bit_string, 48, 51) + 10 * decode_part(reversed_bit_string, 56, 57);
+
+        //System_printf("%2u:%2u:%2u:%2u\n", g_rxTime.hours, g_rxTime.mins, g_rxTime.secs, g_rxTime.frame);
+        //System_flush();
     }
 }
 
