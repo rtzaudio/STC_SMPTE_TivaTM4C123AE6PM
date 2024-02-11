@@ -154,8 +154,8 @@ Int main()
      */
     Hwi_plug(INT_WTIMER1A, WTimer1AIntHandler);
     Hwi_plug(INT_WTIMER1B, WTimer1BIntHandler);
-    Hwi_plug(INT_WTIMER0A, WTimer0AIntHandler);
-    Hwi_plug(INT_WTIMER0B, WTimer0BIntHandler);
+    //Hwi_plug(INT_WTIMER0A, WTimer0AIntHandler);
+    //Hwi_plug(INT_WTIMER0B, WTimer0BIntHandler);
 
     /* Now start the main application button polling task */
 
@@ -220,9 +220,9 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 
     /* Reset the SMPTE encoder and decoder */
     SMPTE_Encoder_Reset();
-    SMPTE_Decoder_Reset();
 
-    SMPTE_Decoder_Start();
+    /* Startup the packet decoder task and interrupts */
+    STC_SMPTE_initDecoder();
 
     /*
      * Enter the main SPI slave processing loop

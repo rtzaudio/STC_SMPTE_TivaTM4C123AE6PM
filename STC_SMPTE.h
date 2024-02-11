@@ -125,10 +125,9 @@ void SMPTE_Encoder_Reset(void);
 Void WTimer1AIntHandler(UArg arg);
 Void WTimer1BIntHandler(UArg arg);
 
+void STC_SMPTE_initDecoder(void);
 int SMPTE_Decoder_Start();
 int SMPTE_Decoder_Stop(void);
 void SMPTE_Decoder_Reset(void);
-Void WTimer0AIntHandler(UArg arg);
-Void WTimer0BIntHandler(UArg arg);
 
 /* End-Of-File */
