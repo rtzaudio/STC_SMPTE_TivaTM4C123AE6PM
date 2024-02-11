@@ -256,20 +256,19 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
 
         uint64_t w = reverseBits64(word.raw.data);
 
-        uint32_t t1, t2;
+        word.raw.data = w;
 
-        t1 = (w << 0) & 0x0F;
-
-        t2 = ((w << 8) & 0x03) * 10;
-
-        g_rxTime.frame = t1 + (t2 * 10);
+        //uint32_t t1, t2;
+        //t1 = (w << 0) & 0x0F;
+        //t2 = ((w << 8) & 0x03) * 10;
+        //g_rxTime.frame = t1 + (t2 * 10);
 
         //g_rxTime.frame = ((word.raw.data << 0) & 0x0F) + (((word.raw.data << 8) & 0x03) * 10);
 
-        //g_rxTime.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
-        //g_rxTime.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
-        //g_rxTime.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
-        //g_rxTime.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
+        g_rxTime.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
+        g_rxTime.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
+        g_rxTime.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
+        g_rxTime.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
     }
 }
 
