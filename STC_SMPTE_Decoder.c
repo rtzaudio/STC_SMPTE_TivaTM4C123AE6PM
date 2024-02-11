@@ -153,8 +153,8 @@ static Void WTimer0AHwi(UArg arg);
 static Void WTimer0BHwi(UArg arg);
 static void HandleEdgeChange(void);
 
-static uint8_t decode_part(uint64_t bit_string, int start_bit, int stop_bit);
-static uint64_t reverse_bit_order(uint64_t v, int significant_bits);
+//static uint8_t decode_part(uint64_t bit_string, int start_bit, int stop_bit);
+//static uint64_t reverse_bit_order(uint64_t v, int significant_bits);
 
 //*****************************************************************************
 //********************** SMPTE DECODER SUPPORT ********************************
@@ -242,10 +242,12 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
 
         //uint64_t reversed_bit_string = reverse_bit_order(word, 61);
 
-        g_rxTime.frame = decode_part(word.raw.data, 0, 3)   + (decode_part(word.raw.data, 8, 9) * 10);
-        g_rxTime.secs  = decode_part(word.raw.data, 16, 19) + (decode_part(word.raw.data, 24, 26) * 10);
-        g_rxTime.mins  = decode_part(word.raw.data, 32, 35) + (decode_part(word.raw.data, 40, 42) * 10);
-        g_rxTime.hours = decode_part(word.raw.data, 48, 51) + (decode_part(word.raw.data, 56, 57) * 10);
+        g_rxTime.frame = ((word.raw.data << 0) & 0x0F) + (((word.raw.data << 8) & 0x03) * 10);
+
+        g_rxTime.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
+        g_rxTime.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
+        g_rxTime.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
+        g_rxTime.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
     }
 }
 
@@ -497,51 +499,6 @@ void HandleEdgeChange(void)
 }
 
 #if 0
-void decode_ltc_bit(int new_bit)
-{
-    // Shift one bit
-    bit_string = (bit_string << 1);
-
-    // a bit shift adds a zero, if a 1 is needed add 1
-    if (new_bit == 1)
-        bit_string |= 1;
-
-    // if the current_word matches the sync word
-    if ((bit_string & sync_mask) == sync_word_fwd)
-    {
-        bit_string = 0;
-        //since_sync_found = 0;
-        bit_index = -1;         //bit 79
-
-        //a full frame has passed
-        //ltc_frame_complete();
-    }
-    else //if (since_sync_found < 33333)
-    {
-        //bit index in LTC message
-        bit_index++;
-
-        //info above bit 60 is ignored.
-        if (bit_index == 60)
-        {
-            //bit string length = index + 1 = 61
-            uint64_t reversed_bit_string = reverse_bit_order(bit_string, 61);
-
-            //see https://en.wikipedia.org/wiki/Linear_timecode
-
-            //This decodes only time info, user fields are ignored
-            g_rxTime.frame = decode_part(reversed_bit_string, 0, 3)   + 10 * decode_part(reversed_bit_string, 8, 9);
-            g_rxTime.secs  = decode_part(reversed_bit_string, 16, 19) + 10 * decode_part(reversed_bit_string, 24, 26);
-            g_rxTime.mins  = decode_part(reversed_bit_string, 32, 35) + 10 * decode_part(reversed_bit_string, 40, 42);
-            g_rxTime.hours = decode_part(reversed_bit_string, 48, 51) + 10 * decode_part(reversed_bit_string, 56, 57);
-
-            bit_string = 0;
-        }
-    }
-}
-#endif
-
-
 // Reverses the bit order of the bit string in v, keeping only the given amount
 // of bits
 //
@@ -596,6 +553,7 @@ uint8_t decode_part(uint64_t bit_string, int start_bit, int stop_bit)
 
   return (uint8_t)masked_bit_string;
 }
+#endif
 
 //*****************************************************************************
 //
