@@ -217,6 +217,20 @@ void SMPTE_initDecoder(void)
 // SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
 //*****************************************************************************
 
+uint64_t reverseBits64(uint64_t x)
+{
+    unsigned int s = sizeof(x) * 8;
+    uint64_t mask = ~((uint64_t)0);
+
+    while ((s >>= 1) > 0)
+    {
+        mask ^= mask << s;
+        x = ((x >> s) & mask) | ((x << s) & ~mask);
+    }
+
+    return x;
+}
+
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
     LTCFrameWord word;
@@ -240,12 +254,14 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Toggle the LED on each packet received */
         GPIO_toggle(Board_STAT_LED);
 
-        uint64_t w = reverse_bit_order(word.raw.data, 61);
+        uint64_t w = reverseBits64(word.raw.data);
 
         uint32_t t1, t2;
 
         t1 = (w << 0) & 0x0F;
+
         t2 = ((w << 8) & 0x03) * 10;
+
         g_rxTime.frame = t1 + (t2 * 10);
 
         //g_rxTime.frame = ((word.raw.data << 0) & 0x0F) + (((word.raw.data << 8) & 0x03) * 10);
@@ -505,6 +521,22 @@ void HandleEdgeChange(void)
 }
 
 
+#if 0
+uint64_t kbitreverse (uint64_t n)
+{
+  static const uint64_t m0 = 0x5555555555555555LLU;
+  static const uint64_t m1 = 0x0300c0303030c303LLU;
+  static const uint64_t m2 = 0x00c0300c03f0003fLLU;
+  static const uint64_t m3 = 0x00000ffc00003fffLLU;
+  n = ((n>>1)&m0) | (n&m0)<<1;
+  n = swapbits<uint64_t, m1, 4>(n);
+  n = swapbits<uint64_t, m2, 8>(n);
+  n = swapbits<uint64_t, m3, 20>(n);
+  n = (n >> 34) | (n << 30);
+  return n;
+}
+#endif
+
 // Reverses the bit order of the bit string in v, keeping only the given amount
 // of bits
 //
@@ -515,6 +547,7 @@ void HandleEdgeChange(void)
 //  uint64_t expected_result = 0b1001100;
 //  expected_result==reverse_bit_order(a,7);
 
+#if 0
 uint64_t reverse_bit_order(uint64_t v, int significant_bits)
 {
     uint64_t r = v;             // r will be reversed bits of v; first get LSB of v
@@ -540,7 +573,7 @@ uint64_t reverse_bit_order(uint64_t v, int significant_bits)
 //  uint64_t expected_result = 0b1011;
 //  expected_result == decode_part(a,3,6);
 
-#if 0
+
 uint8_t decode_part(uint64_t bit_string, int start_bit, int stop_bit)
 {
   // This shift puts the start bit on the first place
