@@ -272,6 +272,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         tc.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
         tc.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
 
+#if DEBUG_SMPTE
         if (secs != tc.secs)
         {
             secs = tc.secs;
@@ -279,6 +280,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
             System_printf("%2u:%2u:%2u:%2u\n", tc.hours, tc.mins, tc.secs, tc.frame);
             System_flush();
         }
+#endif
     }
 }
 
