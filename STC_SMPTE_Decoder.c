@@ -154,7 +154,7 @@ static Void WTimer0BHwi(UArg arg);
 static void HandleEdgeChange(void);
 
 //static uint8_t decode_part(uint64_t bit_string, int start_bit, int stop_bit);
-//static uint64_t reverse_bit_order(uint64_t v, int significant_bits);
+static uint64_t reverse_bit_order(uint64_t v, int significant_bits);
 
 //*****************************************************************************
 //********************** SMPTE DECODER SUPPORT ********************************
@@ -240,14 +240,20 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Toggle the LED on each packet received */
         GPIO_toggle(Board_STAT_LED);
 
-        //uint64_t reversed_bit_string = reverse_bit_order(word, 61);
+        uint64_t w = reverse_bit_order(word.raw.data, 61);
 
-        g_rxTime.frame = ((word.raw.data << 0) & 0x0F) + (((word.raw.data << 8) & 0x03) * 10);
+        uint32_t t1, t2;
 
-        g_rxTime.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
-        g_rxTime.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
-        g_rxTime.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
-        g_rxTime.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
+        t1 = (w << 0) & 0x0F;
+        t2 = ((w << 8) & 0x03) * 10;
+        g_rxTime.frame = t1 + (t2 * 10);
+
+        //g_rxTime.frame = ((word.raw.data << 0) & 0x0F) + (((word.raw.data << 8) & 0x03) * 10);
+
+        //g_rxTime.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
+        //g_rxTime.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
+        //g_rxTime.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
+        //g_rxTime.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
     }
 }
 
@@ -498,7 +504,7 @@ void HandleEdgeChange(void)
     }
 }
 
-#if 0
+
 // Reverses the bit order of the bit string in v, keeping only the given amount
 // of bits
 //
@@ -534,6 +540,7 @@ uint64_t reverse_bit_order(uint64_t v, int significant_bits)
 //  uint64_t expected_result = 0b1011;
 //  expected_result == decode_part(a,3,6);
 
+#if 0
 uint8_t decode_part(uint64_t bit_string, int start_bit, int stop_bit)
 {
   // This shift puts the start bit on the first place
