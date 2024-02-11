@@ -98,19 +98,24 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
-
 /* XDCtools Header files */
 #include "Board.h"
 #include "STC_SMPTE.h"
 #include "STC_SMPTE_SPI.h"
 #include "libltc\ltc.h"
 
-/* Constants and Macros */
-extern SYSCFG g_cfg;
-extern  uint32_t g_systemClock;
+/* SMPTE 80-bit frame buffer */
+typedef struct ltcframe_t {
+    uint64_t data;              /* 64-bits data */
+    uint16_t sync;              /* 16-bits sync */
+} ltcframe_t;                   /* 80-bit frame */
 
-/* SMPTE Decoder variables */
-SMPTETimecode g_rxTime;
+typedef union LTCFrameWord_t {
+    LTCFrame    ltc;            /* members form */
+    ltcframe_t  raw;            /* raw bit form */
+} LTCFrameWord;
+
+/*** SMPTE Decoder variables ***/
 
 bool g_decoderEnabled = false;
 
@@ -118,48 +123,44 @@ volatile uint32_t g_uiPeriod = 0;
 volatile uint32_t g_uiHighCount = 0;
 volatile uint32_t g_uiLowCount = 0;
 volatile uint32_t g_uiAveragePeriod = 0;
-
-volatile int g_rxBitCount = 0;
+volatile uint32_t g_rxBitCount = 0;
 
 volatile bool first_transition = false;
 volatile int new_bit = 0;
-
-uint64_t bit_string = 0;
-int bit_index = 0;
-
-//the sync word is available in bit 64 - 79,
-//see https://en.wikipedia.org/wiki/Linear_timecode
 
 const uint64_t sync_word_fwd = 0b0011111111111101;
 const uint64_t sync_word_rev = 0b1011111111111100;
 const uint64_t sync_mask = 0b1111111111111111;
 
-static void HandleEdgeChange(void);
-
-void ltc_frame_complete(void);
-void decode_ltc_bit(int new_bit);
-int decode_part(uint64_t bit_string, int start_bit,int stop_bit);
-uint64_t reverse_bit_order(uint64_t v, int significant_bits);
-
-
-
-/* Hwi_Struct used in the initDMA Hwi_construct call */
+/* Hwi_Struct for timer interrupt handlers */
 static Hwi_Struct wtimer0AHwiStruct;
 static Hwi_Struct wtimer0BHwiStruct;
 
-Mailbox_Handle mailboxWord = NULL;
+static Mailbox_Handle mailboxWord = NULL;
 
-Void WTimer0AHwi(UArg arg);
-Void WTimer0BHwi(UArg arg);
-Void DecodeTaskFxn(UArg arg0, UArg arg1);
-
+static SMPTETimecode g_rxTime;
 static ltcframe_t smpte_word;
 
+/*** External Data Items ***/
+
+extern SYSCFG g_cfg;
+extern  uint32_t g_systemClock;
+
+/*** Static Function Prototypes ***/
+
+static Void DecodeTaskFxn(UArg arg0, UArg arg1);
+static Void WTimer0AHwi(UArg arg);
+static Void WTimer0BHwi(UArg arg);
+static void HandleEdgeChange(void);
+
+static int decode_part(uint64_t bit_string, int start_bit,int stop_bit);
+static uint64_t reverse_bit_order(uint64_t v, int significant_bits);
+
 //*****************************************************************************
-// SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
+//********************** SMPTE DECODER SUPPORT ********************************
 //*****************************************************************************
 
-void STC_SMPTE_initDecoder(void)
+void SMPTE_initDecoder(void)
 {
     Error_Block eb;
     Hwi_Params  hwiParams;
@@ -199,7 +200,7 @@ void STC_SMPTE_initDecoder(void)
     /* Create SMPTE packet decoder mailbox */
     Error_init(&eb);
     Mailbox_Params_init(&mboxParams);
-    mailboxWord = Mailbox_create(sizeof(uint64_t), 32, &mboxParams, &eb);
+    mailboxWord = Mailbox_create(sizeof(LTCFrameWord), 32, &mboxParams, &eb);
     if (mailboxWord == NULL) {
         System_abort("Mailbox create failed\nAborting...");
     }
@@ -213,8 +214,63 @@ void STC_SMPTE_initDecoder(void)
 }
 
 //*****************************************************************************
-//********************** SMPTE DECODER SUPPORT ********************************
+// SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
 //*****************************************************************************
+
+Void DecodeTaskFxn(UArg arg0, UArg arg1)
+{
+    LTCFrameWord word;
+
+    /* Initialize and start edge decode interrupts */
+    SMPTE_Decoder_Start();
+
+    /*
+     * Loop waiting for SMPTE word packets to arrive
+     */
+
+    while (true)
+    {
+        /* Wait for a 64-bit timecode word */
+        if (!Mailbox_pend(mailboxWord, &word, 100))
+        {
+            GPIO_write(Board_STAT_LED, Board_LED_ON);
+            continue;
+        }
+
+        /* Toggle the LED on each packet received */
+        GPIO_toggle(Board_STAT_LED);
+
+        //bit string length = index + 1 = 61
+        //uint64_t reversed_bit_string = reverse_bit_order(word, 61);
+
+        //This decodes only time info, user fields are ignored
+        //g_rxTime.frame = decode_part(reversed_bit_string, 0, 3)   + 10 * decode_part(reversed_bit_string, 8, 9);
+        //g_rxTime.secs  = decode_part(reversed_bit_string, 16, 19) + 10 * decode_part(reversed_bit_string, 24, 26);
+        //g_rxTime.mins  = decode_part(reversed_bit_string, 32, 35) + 10 * decode_part(reversed_bit_string, 40, 42);
+        //g_rxTime.hours = decode_part(reversed_bit_string, 48, 51) + 10 * decode_part(reversed_bit_string, 56, 57);
+    }
+}
+
+//*****************************************************************************
+// Initialize and reset all decoder global variables
+//*****************************************************************************
+
+Void SMPTE_Decoder_Reset(void)
+{
+    /* Zero out the starting time struct */
+    memset(&g_rxTime, 0, sizeof(g_rxTime));
+
+    smpte_word.data = (uint64_t)0;
+    smpte_word.sync = (uint16_t)0;
+
+    first_transition = false;
+    new_bit = 0;
+
+    g_rxBitCount = 0;
+    g_uiPeriod = 0;
+    g_uiLowCount = 0;
+    g_uiHighCount = 0;
+}
 
 //*****************************************************************************
 // Initialize and start the SMPTE decoder edge timer interrupts
@@ -224,18 +280,10 @@ int SMPTE_Decoder_Start(void)
 {
     g_decoderEnabled = true;
 
-    /* Status LED on */
     GPIO_write(Board_STAT_LED, Board_LED_ON);
-
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
 
-    /* Zero out the starting time struct */
-    memset(&g_rxTime, 0, sizeof(g_rxTime));
-
-    /* Reset global variables */
-    new_bit = 0;
-    first_transition = false;
-    g_rxBitCount = g_uiPeriod = g_uiLowCount = g_uiHighCount = 0;
+    SMPTE_Decoder_Reset();
 
     /* Configure the GPIO for the Timer peripheral */
     GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5);
@@ -316,17 +364,6 @@ int SMPTE_Decoder_Stop(void)
     return 1;
 }
 
-Void SMPTE_Decoder_Reset(void)
-{
-    /* Zero out the starting time struct */
-    memset(&g_rxTime, 0, sizeof(g_rxTime));
-
-    g_rxBitCount = 0;
-
-    smpte_word.data = (uint64_t)0;
-    smpte_word.sync = (uint16_t)0;
-}
-
 //*****************************************************************************
 // SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
 //*****************************************************************************
@@ -362,7 +399,8 @@ Void WTimer0BHwi(UArg arg)
 }
 
 //*****************************************************************************
-//
+// Handle high and low hardware level edge change interrupts while
+// shifting in bits of the SMPTE data into our 80-bit packet buffer.
 //*****************************************************************************
 
 void HandleEdgeChange(void)
@@ -424,36 +462,35 @@ void HandleEdgeChange(void)
         /* Shift the 16-bit sync word bits */
         smpte_word.sync = smpte_word.sync << 1;
 
-        /* carry bit 63 into sync bit-0 if needed, otherwise zero bit */
+        /* Carry bit-63 into sync bit-0 if needed, otherwise it's a zero bit */
         if (smpte_word.data & 0x8000000000000000)
             smpte_word.sync |= 1;
 
         /* Shift the 80-bit frame word bits */
         smpte_word.data = smpte_word.data << 1;
 
-        /* Add in the new high bit, otherwise zero */
+        /* Add in new smpte word bit, either zero or a one */
         if (new_bit)
             smpte_word.data |= 1;
 
-        /* Must see the SMPTE sync word at the end of frame to consider it a valid
-         * packet. Parse out the frame members into our buffer if sync word found.
+        /* The 16-bit SMPTE sync word must be at the end of the frame
+         * to consider it a valid 80-bit SMPTE frame.
          */
-
-        ++g_rxBitCount;
-
-        if (g_rxBitCount >= LTC_FRAME_BIT_COUNT)
+        if (++g_rxBitCount >= LTC_FRAME_BIT_COUNT)
         {
             if (smpte_word.sync == sync_word_fwd)
             {
                 /* Post the 64-bit SMPTE word to decode task */
-                Mailbox_post(mailboxWord, &smpte_word.data, BIOS_NO_WAIT);
+                Mailbox_post(mailboxWord, &smpte_word, BIOS_NO_WAIT);
+
                 /* Reset bit counter and buffer */
                 g_rxBitCount = 0;
             }
             else if (smpte_word.sync == sync_word_rev)
             {
                 /* Post the 64-bit SMPTE word to decode task */
-                Mailbox_post(mailboxWord, &smpte_word.data, BIOS_NO_WAIT);
+                Mailbox_post(mailboxWord, &smpte_word, BIOS_NO_WAIT);
+
                 /* Reset bit counter and buffer */
                 g_rxBitCount = 0;
             }
@@ -461,56 +498,7 @@ void HandleEdgeChange(void)
     }
 }
 
-//*****************************************************************************
-// SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
-//*****************************************************************************
-
-Void DecodeTaskFxn(UArg arg0, UArg arg1)
-{
-    uint64_t word;
-    LTCFrame frame;
-
-    /* Reset decoder buffers */
-    SMPTE_Decoder_Reset();
-
-    /* Initialize and start edge decode interrupts */
-    SMPTE_Decoder_Start();
-
-    /*
-     * Loop waiting for SMPTE 64-bit word packets to arrive
-     */
-
-    while (true)
-    {
-        /* Wait for a 64-bit timecode word */
-        if (!Mailbox_pend(mailboxWord, &word, 100))
-        {
-            GPIO_write(Board_STAT_LED, Board_LED_ON);
-            continue;
-        }
-
-        /* Toggle the LED on each packet received */
-        GPIO_toggle(Board_STAT_LED);
-
-        memcpy(&frame, &word, sizeof(word));
-
-        frame.sync_word = 0;
-
-        //bit string length = index + 1 = 61
-        uint64_t reversed_bit_string = reverse_bit_order(word, 61);
-
-        //This decodes only time info, user fields are ignored
-        //g_rxTime.frame = decode_part(reversed_bit_string, 0, 3)   + 10 * decode_part(reversed_bit_string, 8, 9);
-        //g_rxTime.secs  = decode_part(reversed_bit_string, 16, 19) + 10 * decode_part(reversed_bit_string, 24, 26);
-        //g_rxTime.mins  = decode_part(reversed_bit_string, 32, 35) + 10 * decode_part(reversed_bit_string, 40, 42);
-        //g_rxTime.hours = decode_part(reversed_bit_string, 48, 51) + 10 * decode_part(reversed_bit_string, 56, 57);
-
-        //System_printf("%2u:%2u:%2u:%2u\n", g_rxTime.hours, g_rxTime.mins, g_rxTime.secs, g_rxTime.frame);
-        //System_flush();
-    }
-}
-
-
+#if 0
 void decode_ltc_bit(int new_bit)
 {
     // Shift one bit
@@ -553,6 +541,8 @@ void decode_ltc_bit(int new_bit)
         }
     }
 }
+#endif
+
 
 // Reverses the bit order of the bit string in v, keeping only the given amount
 // of bits

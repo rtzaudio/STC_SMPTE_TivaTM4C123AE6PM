@@ -222,7 +222,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     SMPTE_Encoder_Reset();
 
     /* Startup the packet decoder task and interrupts */
-    STC_SMPTE_initDecoder();
+    SMPTE_initDecoder();
 
     /*
      * Enter the main SPI slave processing loop
