@@ -233,6 +233,8 @@ uint64_t reverseBits64(uint64_t x)
 
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
+    uint8_t secs = 0;
+
     LTCFrameWord word;
 
     /* Initialize and start edge decode interrupts */
@@ -254,21 +256,25 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Toggle the LED on each packet received */
         GPIO_toggle(Board_STAT_LED);
 
+        /* Reverse all 64-bits in the frame */
         uint64_t w = reverseBits64(word.raw.data);
 
         word.raw.data = w;
-
-        //uint32_t t1, t2;
-        //t1 = (w << 0) & 0x0F;
-        //t2 = ((w << 8) & 0x03) * 10;
-        //g_rxTime.frame = t1 + (t2 * 10);
-
-        //g_rxTime.frame = ((word.raw.data << 0) & 0x0F) + (((word.raw.data << 8) & 0x03) * 10);
 
         g_rxTime.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
         g_rxTime.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
         g_rxTime.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
         g_rxTime.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
+
+        if (secs != g_rxTime.secs)
+        {
+            secs = g_rxTime.secs;
+
+            System_printf("%2u:%2u:%2u:%2u\n",
+                          g_rxTime.hours, g_rxTime.mins,
+                          g_rxTime.secs, g_rxTime.frame);
+            System_flush();
+        }
     }
 }
 
