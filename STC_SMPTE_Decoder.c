@@ -123,6 +123,9 @@ typedef union LTCFrameWord_t {
 /*** SMPTE Decoder variables ***/
 
 bool g_decoderEnabled = false;
+bool g_bPostInterrupts = false;
+
+SMPTETimecode g_rxTime;
 
 volatile uint32_t g_uiPeriod = 0;
 volatile uint32_t g_uiHighCount = 0;
@@ -146,7 +149,7 @@ static Mailbox_Handle mailboxWord = NULL;
 /*** External Data Items ***/
 
 extern SYSCFG g_cfg;
-extern  uint32_t g_systemClock;
+extern uint32_t g_systemClock;
 
 /*** Static Function Prototypes ***/
 
@@ -233,7 +236,6 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
 #if (DEBUG_SMPTE > 0)
     uint8_t secs = 0;
 #endif
-    SMPTETimecode tc;
     LTCFrameWord word;
 
     /* Initialize and start edge decode interrupts */
@@ -256,19 +258,26 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         GPIO_toggle(Board_STAT_LED);
 
         /* Set direction indicator pin */
-        if (word.ltc.sync_word == sync_word_fwd)
-            GPIO_write(Board_DIRECTION, PIN_LOW);
-        else
+        if (word.ltc.sync_word == sync_word_rev)
             GPIO_write(Board_DIRECTION, PIN_HIGH);
+        else
+            GPIO_write(Board_DIRECTION, PIN_LOW);
 
         /* Reverse all 64-bits in the data part of the SMPTE frame */
         word.raw.data = reverseBits64(word.raw.data);
 
         /* Now extract any time and other data from the packet */
-        tc.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
-        tc.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
-        tc.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
-        tc.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
+        g_rxTime.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
+        g_rxTime.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
+        g_rxTime.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
+        g_rxTime.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
+
+        /* Assert the interrupt line */
+        if (g_bPostInterrupts)
+        {
+            /* Notify host a packet is ready */
+            GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
+        }
 
 #if (DEBUG_SMPTE > 0)
         if (secs != tc.secs)
@@ -307,6 +316,7 @@ Void SMPTE_Decoder_Reset(void)
 int SMPTE_Decoder_Start(void)
 {
     g_decoderEnabled = true;
+    g_bPostInterrupts = false;
 
     GPIO_write(Board_STAT_LED, Board_LED_ON);
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
@@ -370,6 +380,9 @@ int SMPTE_Decoder_Start(void)
 
 int SMPTE_Decoder_Stop(void)
 {
+    g_bPostInterrupts = false;
+    g_decoderEnabled = false;
+
     /* Disable both Timer A and Timer B */
     TimerDisable(WTIMER0_BASE, TIMER_BOTH);
 
@@ -389,8 +402,7 @@ int SMPTE_Decoder_Stop(void)
     GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
     GPIO_write(Board_DIRECTION, PIN_LOW);
-
-    g_decoderEnabled = false;
+    GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
 
     return 1;
 }

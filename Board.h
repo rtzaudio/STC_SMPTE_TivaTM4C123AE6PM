@@ -48,7 +48,7 @@ extern "C" {
 
 #define Board_BOOTLOAD              STC_SMPTE_BOOTLOAD      /* 0 = PA7 */
 #define Board_SMPTE_IN              STC_SMPTE_IN            /* 1 = PC4 */
-#define Board_SMPTE_INT             STC_SMPTE_INT_N         /* 2 = PA6 */
+#define Board_SMPTE_INT_N           STC_SMPTE_INT_N         /* 2 = PA6 */
 #define Board_SMPTE_OUT             STC_SMPTE_OUT           /* 3 = PB6 */
 #define Board_SMPTE_MUTE            STC_SMPTE_MUTE          /* 4 = PB7 */
 #define Board_STAT_LED              STC_SMPTE_STAT_LED      /* 5 = PC7 */

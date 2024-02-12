@@ -27,6 +27,27 @@
  *     |   +---+---+   +-----+-----+   +-------------+-------------+
  *     |       |             |                       |
  *    R/W     RSVD          REG                  DATA/FLAGS
+ *
+ * The SMPTE_REG_DATA command register returns 48-bits of additional
+ * time code data containing the HH:MM:SS:FF as follows.
+ *
+ *   +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+ *   | D | D | D | D | D | D | D | D | D | D | D | D | D | D | D | D |
+ *   |15 |14 |13 |12 |11 |10 | 9 | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+ *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *     |                           |   |                           |
+ *     +-------------+-------------+   +-------------+-------------+
+ *                   |                               |
+ *                  SECS                           FRAME
+ *
+ *   +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+ *   | D | D | D | D | D | D | D | D | D | D | D | D | D | D | D | D |
+ *   |31 |30 |29 |28 |27 |26 |25 |24 |23 |22 |21 |20 |19 |18 |17 |16 |
+ *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *     |                           |   |                           |
+ *     +-------------+-------------+   +-------------+-------------+
+ *                   |                               |
+ *                 HOUR                             MINS
  */
 
 /* Upper bit of indicates R/W */
@@ -40,15 +61,15 @@
 #define SMPTE_DATA_MASK         0x000F          /* B0-B7 8-bits of data        */
 
 /* SMPTE Controller Registers (C0-C3) */
-#define SMPTE_REG_REVID         1               /* Rev=lower nibble(RO, 16-bit)*/
-#define SMPTE_REG_ENCCTL        2               /* Encoder Cntrl   (RW, 8-bit) */
-#define SMPTE_REG_DECCTL        3               /* Decoder Cntrl   (RW, 8-bit) */
-#define SMPTE_REG_STAT          4               /* Decode Status   (RO, 8-bit) */
-#define SMPTE_REG_DATA          5               /* Data Register   (RO, 8-bit) */
-#define SMPTE_REG_HOUR          6               /* Hour (0-1)      (RW, 8-bit) */
-#define SMPTE_REG_MINS          7               /* Minutes (0-59)  (RW, 8-bit) */
-#define SMPTE_REG_SECS          8               /* Seconds (0-59)  (RW, 8-bit) */
-#define SMPTE_REG_FRAME         9               /* Frame# (0-29)   (RW, 8-bit) */
+#define SMPTE_REG_REVID         1               /* Rev=low nibble (RO, 16-bit) */
+#define SMPTE_REG_ENCCTL        2               /* Encoder Cntrl  (RW, 16-bit) */
+#define SMPTE_REG_DECCTL        3               /* Decoder Cntrl  (RW, 16-bit) */
+#define SMPTE_REG_STAT          4               /* Decode Status  (RO, 16-bit) */
+#define SMPTE_REG_DATA          5               /* Data Register  (RO, 48-bit) */
+#define SMPTE_REG_HOUR          6               /* Hour (0-1)     (RW, 16-bit) */
+#define SMPTE_REG_MINS          7               /* Minutes (0-59) (RW, 16-bit) */
+#define SMPTE_REG_SECS          8               /* Seconds (0-59) (RW, 16-bit) */
+#define SMPTE_REG_FRAME         9               /* Frame# (0-29)  (RW, 16-bit) */
 
 /* Helpful macros for combining bit masks */
 #define SMPTE_REG_SET(x)        (((x) << 8) & SMPTE_REG_MASK)
@@ -71,6 +92,7 @@
 /* Decoder SMPTE_REG_DECCTL Register (B0-B7) */
 #define SMPTE_DECCTL_FPS(x)     (((x) & 0x03))
 #define SMPTE_DECCTL_RESET      (1 << 2)        /* reset SMPTE frame decoder   */
+#define SMPTE_DECCTL_INT        (1 << 6)        /* SMPTE decoder int enable    */
 #define SMPTE_DECCTL_ENABLE     (1 << 7)        /* SMPTE decoder enable bit    */
 #define SMPTE_DECCTL_DISABLE    (0)
 

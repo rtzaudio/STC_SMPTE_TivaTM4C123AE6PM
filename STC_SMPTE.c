@@ -111,9 +111,11 @@
 SYSCFG g_cfg;
 uint32_t g_systemClock;
 
+extern SMPTETimecode g_rxTime;
 extern SMPTETimecode g_txTime;
 extern bool g_encoderEnabled;
 extern bool g_decoderEnabled;
+extern bool g_bPostInterrupts;
 
 //*****************************************************************************
 // Main Program Entry Point
@@ -135,8 +137,9 @@ Int main()
     Board_initGPIO();
     Board_initSPI();
 
-    /* Turn the LED on */
     GPIO_write(Board_STAT_LED, Board_LED_ON);
+    GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+    GPIO_write(Board_BUSY, PIN_LOW);
 
     /* WTIMER1 - SMPTE output generator
      * WTIMER0 - SMPTE input (64-bit timer option pins PC4 & PC5)
@@ -194,9 +197,6 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     /* Read system parameters from EEPROM */
     //SysParamsRead(&g_cfg);
     InitSysDefaults(&g_cfg);
-
-    /* Set busy pin high to indicate busy status */
-    GPIO_write(Board_BUSY, PIN_LOW);
 
     /* Open SLAVE SPI port from STC motherboard
      * 1 Mhz, Moto fmt, polarity 1, phase 0
@@ -260,6 +260,28 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
          *     |   +---+---+   +-----+-----+   +-------------+-------------+
          *     |       |             |                       |
          *    R/W     RSVD          REG                  DATA/FLAGS
+         *
+         *
+         * The SMPTE_REG_DATA command register returns and additional 32-bits
+         * of time code data containing the HH:MM:SS:FF as follows.
+         *
+         *   +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+         *   | D | D | D | D | D | D | D | D | D | D | D | D | D | D | D | D |
+         *   |15 |14 |13 |12 |11 |10 | 9 | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+         *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+         *     |                           |   |                           |
+         *     +-------------+-------------+   +-------------+-------------+
+         *                   |                               |
+         *                  SECS                           FRAME
+         *
+         *   +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+         *   | D | D | D | D | D | D | D | D | D | D | D | D | D | D | D | D |
+         *   |31 |30 |29 |28 |27 |26 |25 |24 |23 |22 |21 |20 |19 |18 |17 |16 |
+         *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+         *     |                           |   |                           |
+         *     +-------------+-------------+   +-------------+-------------+
+         *                   |                               |
+         *                 HOUR                             MINS
          */
 
         /* lower 8-bits contats data or flags */
@@ -407,6 +429,9 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 if (g_decoderEnabled)
                     uReply |= SMPTE_DECCTL_ENABLE;
 
+                if (g_bPostInterrupts)
+                    uReply |= SMPTE_DECCTL_INT;
+
                 /* Send the reply word back */
                 transaction2.count = 1;
                 transaction2.txBuf = (Ptr)&uReply;
@@ -458,8 +483,13 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                     if (uRequest & SMPTE_DECCTL_RESET)
                         SMPTE_Decoder_Reset();
 
+                    /* Restart the decoder */
                     SMPTE_Decoder_Start();
                 }
+
+                /* Interrupt on SMPTE packet receive */
+                if (uRequest & SMPTE_DECCTL_INT)
+                    g_bPostInterrupts = true;
             }
             break;
 
@@ -470,6 +500,25 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
              * ====================================================
              */
 
+            /* Release the active low interrupt line */
+            GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+
+            if (uRequest & SMPTE_F_READ)
+            {
+                if (g_decoderEnabled)
+                    uReply |= SMPTE_DECCTL_ENABLE;
+
+                if (g_bPostInterrupts)
+                    uReply |= SMPTE_DECCTL_INT;
+
+                /* Send the reply word back */
+                transaction2.count = 1;
+                transaction2.txBuf = (Ptr)&uReply;
+                transaction2.rxBuf = (Ptr)&uDummy;
+
+                /* Send the SPI transaction */
+                success = SPI_transfer(hSlave, &transaction2);
+            }
             break;
 
         case SMPTE_REG_DATA:
@@ -479,6 +528,32 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
              * ====================================================
              */
 
+            /* Release the active low interrupt line */
+            GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+
+            if (uRequest & SMPTE_F_READ)
+            {
+                uint16_t uiData[4];
+                uint16_t uiReply[4];
+
+                if (g_encoderEnabled)
+                    uReply |= SMPTE_ENCCTL_ENABLE;
+
+                if (g_bPostInterrupts)
+                    uReply |= SMPTE_DECCTL_INT;
+
+                uiData[0] = uReply;
+                uiData[1] = ((g_rxTime.secs  << 4) | (g_rxTime.frame & 0xFF));
+                uiData[2] = ((g_rxTime.hours << 4) | (g_rxTime.mins  & 0xFF));
+
+                /* Send the 48-bit reply word back */
+                transaction2.count = 3;
+                transaction2.txBuf = (Ptr)&uiData;
+                transaction2.rxBuf = (Ptr)&uiReply;
+
+                /* Send the SPI transaction */
+                success = SPI_transfer(hSlave, &transaction2);
+            }
             break;
 
         case SMPTE_REG_HOUR:
