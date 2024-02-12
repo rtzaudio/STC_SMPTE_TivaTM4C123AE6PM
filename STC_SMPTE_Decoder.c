@@ -172,13 +172,7 @@ void SMPTE_initDecoder(void)
 
     Error_init(&eb);
     Hwi_Params_init(&hwiParams);
-
-    Hwi_construct(&(wtimer0AHwiStruct),
-                  INT_WTIMER0A,
-                  WTimer0AHwi,
-                  &hwiParams,
-                  &eb);
-
+    Hwi_construct(&(wtimer0AHwiStruct), INT_WTIMER0A, WTimer0AHwi, &hwiParams, &eb);
     if (Error_check(&eb)) {
         System_abort("Couldn't construct WTIMER0A error hwi");
     }
@@ -187,13 +181,7 @@ void SMPTE_initDecoder(void)
 
     Error_init(&eb);
     Hwi_Params_init(&hwiParams);
-
-    Hwi_construct(&(wtimer0BHwiStruct),
-                  INT_WTIMER0B,
-                  WTimer0BHwi,
-                  &hwiParams,
-                  &eb);
-
+    Hwi_construct(&(wtimer0BHwiStruct), INT_WTIMER0B, WTimer0BHwi, &hwiParams, &eb);
     if (Error_check(&eb)) {
         System_abort("Couldn't construct WTIMER0B error hwi");
     }
