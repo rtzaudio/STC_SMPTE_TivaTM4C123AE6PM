@@ -135,13 +135,13 @@ volatile bool     g_bFirstTransition = false;
 const uint64_t sync_word_fwd = 0b0011111111111101;
 const uint64_t sync_word_rev = 0b1011111111111100;
 
+static ltcframe_t g_smpteWord;
+
 /* Hwi_Struct for timer interrupt handlers */
 static Hwi_Struct wtimer0AHwiStruct;
 static Hwi_Struct wtimer0BHwiStruct;
 
 static Mailbox_Handle mailboxWord = NULL;
-
-static ltcframe_t g_smpteWord;
 
 /*** External Data Items ***/
 
@@ -267,6 +267,12 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Toggle the LED on each packet received */
         GPIO_toggle(Board_STAT_LED);
 
+        /* Set direction indicator pin */
+        if (word.ltc.sync_word == sync_word_fwd)
+            GPIO_write(Board_DIRECTION, PIN_LOW);
+        else
+            GPIO_write(Board_DIRECTION, PIN_HIGH);
+
         /* Reverse all 64-bits in the data part of the SMPTE frame */
         word.raw.data = reverseBits64(word.raw.data);
 
@@ -316,6 +322,7 @@ int SMPTE_Decoder_Start(void)
 
     GPIO_write(Board_STAT_LED, Board_LED_ON);
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
+    GPIO_write(Board_DIRECTION, PIN_LOW);
 
     SMPTE_Decoder_Reset();
 
@@ -375,9 +382,6 @@ int SMPTE_Decoder_Start(void)
 
 int SMPTE_Decoder_Stop(void)
 {
-    /* SMPTE input mute on */
-    GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
-
     /* Disable both Timer A and Timer B */
     TimerDisable(WTIMER0_BASE, TIMER_BOTH);
 
@@ -392,6 +396,11 @@ int SMPTE_Decoder_Stop(void)
 
     /* Status LED */
     GPIO_write(Board_STAT_LED, Board_LED_ON);
+
+    /* SMPTE input mute on */
+    GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
+    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
+    GPIO_write(Board_DIRECTION, PIN_LOW);
 
     g_decoderEnabled = false;
 
