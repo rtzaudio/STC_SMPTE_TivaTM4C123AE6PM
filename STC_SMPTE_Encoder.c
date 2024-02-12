@@ -2,7 +2,7 @@
  *
  * DTC-1200 Digital Transport Controller for Ampex MM-1200 Tape Machines
  *
- * Copyright (C) 2021, RTZ Professional Audio, LLC
+ * Copyright (C) 2021-2024, RTZ Professional Audio, LLC
  * All Rights Reserved
  *
  * RTZ is registered trademark of RTZ Professional Audio, LLC

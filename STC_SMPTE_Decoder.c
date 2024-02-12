@@ -2,7 +2,7 @@
  *
  * DTC-1200 Digital Transport Controller for Ampex MM-1200 Tape Machines
  *
- * Copyright (C) 2021, RTZ Professional Audio, LLC
+ * Copyright (C) 2021-2024, RTZ Professional Audio, LLC
  * All Rights Reserved
  *
  * RTZ is registered trademark of RTZ Professional Audio, LLC
@@ -105,6 +105,8 @@
 #include "libltc\ltc.h"
 
 /*** Data Types and Constants ***/
+
+#define DEBUG_SMPTE     0
 
 /* SMPTE 80-bit frame buffer */
 typedef struct ltcframe_t {
@@ -240,7 +242,9 @@ uint64_t reverseBits64(uint64_t x)
 
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
+#if (DEBUG_SMPTE > 0)
     uint8_t secs = 0;
+#endif
     SMPTETimecode tc;
     LTCFrameWord word;
 
@@ -253,7 +257,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
 
     while (true)
     {
-        /* Wait for a 64-bit timecode word */
+        /* Wait for an 80-bit timecode word */
         if (!Mailbox_pend(mailboxWord, &word, 100))
         {
             GPIO_write(Board_STAT_LED, Board_LED_ON);
@@ -263,7 +267,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Toggle the LED on each packet received */
         GPIO_toggle(Board_STAT_LED);
 
-        /* Reverse all 64-bits in the frame */
+        /* Reverse all 64-bits in the data part of the SMPTE frame */
         word.raw.data = reverseBits64(word.raw.data);
 
         /* Now extract any time and other data from the packet */
@@ -272,7 +276,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         tc.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
         tc.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
 
-#if DEBUG_SMPTE
+#if (DEBUG_SMPTE > 0)
         if (secs != tc.secs)
         {
             secs = tc.secs;

@@ -4,7 +4,7 @@
  *
  * SMPTE-SPI v1.02
  *
- * Copyright (C) 2021, RTZ Professional Audio, LLC
+ * Copyright (C) 2021-2024, RTZ Professional Audio, LLC
  * All Rights Reserved
  *
  * RTZ is registered trademark of RTZ Professional Audio, LLC

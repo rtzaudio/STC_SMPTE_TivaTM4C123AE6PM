@@ -2,7 +2,7 @@
  *
  * DTC-1200 Digital Transport Controller for Ampex MM-1200 Tape Machines
  *
- * Copyright (C) 2021, RTZ Professional Audio, LLC
+ * Copyright (C) 2021-2024, RTZ Professional Audio, LLC
  * All Rights Reserved
  *
  * RTZ is registered trademark of RTZ Professional Audio, LLC
@@ -196,7 +196,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     InitSysDefaults(&g_cfg);
 
     /* Set busy pin high to indicate busy status */
-    GPIO_write(Board_BUSY, PIN_HIGH);
+    GPIO_write(Board_BUSY, PIN_LOW);
 
     /* Open SLAVE SPI port from STC motherboard
      * 1 Mhz, Moto fmt, polarity 1, phase 0
@@ -237,10 +237,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
         transaction1.rxBuf = (Ptr)&uRequest;
 
         /* Send the SPI transaction */
-
-        GPIO_write(Board_BUSY, PIN_LOW);
         success = SPI_transfer(hSlave, &transaction1);
-        GPIO_write(Board_BUSY, PIN_HIGH);
 
         if (!success)
         {
@@ -285,9 +282,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             transaction2.rxBuf = (Ptr)&uDummy;
 
             /* Send the SPI transaction */
-            GPIO_write(Board_BUSY, PIN_LOW);
             success = SPI_transfer(hSlave, &transaction2);
-            GPIO_write(Board_BUSY, PIN_HIGH);
             break;
 
         case SMPTE_REG_ENCCTL:
@@ -329,9 +324,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                GPIO_write(Board_BUSY, PIN_LOW);
                 success = SPI_transfer(hSlave, &transaction2);
-                GPIO_write(Board_BUSY, PIN_HIGH);
             }
             else
             {
@@ -420,9 +413,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                GPIO_write(Board_BUSY, PIN_LOW);
                 success = SPI_transfer(hSlave, &transaction2);
-                GPIO_write(Board_BUSY, PIN_HIGH);
             }
             else
             {
@@ -507,9 +498,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                GPIO_write(Board_BUSY, PIN_LOW);
                 success = SPI_transfer(hSlave, &transaction2);
-                GPIO_write(Board_BUSY, PIN_HIGH);
             }
             else
             {
@@ -537,9 +526,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                GPIO_write(Board_BUSY, PIN_LOW);
                 success = SPI_transfer(hSlave, &transaction2);
-                GPIO_write(Board_BUSY, PIN_HIGH);
             }
             else
             {
@@ -567,9 +554,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                GPIO_write(Board_BUSY, PIN_LOW);
                 success = SPI_transfer(hSlave, &transaction2);
-                GPIO_write(Board_BUSY, PIN_HIGH);
             }
             else
             {
@@ -597,9 +582,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                GPIO_write(Board_BUSY, PIN_LOW);
                 success = SPI_transfer(hSlave, &transaction2);
-                GPIO_write(Board_BUSY, PIN_HIGH);
             }
             else
             {
