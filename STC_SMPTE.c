@@ -323,15 +323,12 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 case 24:
                     uReply = SMPTE_CTL_FPS24;
                     break;
-
                 case 25:
                     uReply = SMPTE_CTL_FPS25;
                     break;
-
                 case 30:
                     uReply = (g_cfg.drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
                     break;
-
                 default:
                     uReply = 0;
                     break;
@@ -362,22 +359,18 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                     g_cfg.frame_rate = 24;
                     g_cfg.drop_frame = false;
                     break;
-
                 case SMPTE_CTL_FPS25:
                     g_cfg.frame_rate = 25;
                     g_cfg.drop_frame = false;
                     break;
-
                 case SMPTE_CTL_FPS30:
                     g_cfg.frame_rate = 30;
                     g_cfg.drop_frame = false;
                     break;
-
                 case SMPTE_CTL_FPS30D:
                     g_cfg.frame_rate = 30;
                     g_cfg.drop_frame = true;
                     break;
-
                 default:
                     g_cfg.frame_rate = 30;
                     g_cfg.drop_frame = true;
@@ -412,15 +405,12 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 case 24:
                     uReply = SMPTE_CTL_FPS24;
                     break;
-
                 case 25:
                     uReply = SMPTE_CTL_FPS25;
                     break;
-
                 case 30:
                     uReply = (g_cfg.drop_frame) ? SMPTE_CTL_FPS30D : SMPTE_CTL_FPS30;
                     break;
-
                 default:
                     uReply = 0;
                     break;
@@ -454,22 +444,18 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                     g_cfg.frame_rate = 24;
                     g_cfg.drop_frame = false;
                     break;
-
                 case SMPTE_CTL_FPS25:
                     g_cfg.frame_rate = 25;
                     g_cfg.drop_frame = false;
                     break;
-
                 case SMPTE_CTL_FPS30:
                     g_cfg.frame_rate = 30;
                     g_cfg.drop_frame = false;
                     break;
-
                 case SMPTE_CTL_FPS30D:
                     g_cfg.frame_rate = 30;
                     g_cfg.drop_frame = true;
                     break;
-
                 default:
                     g_cfg.frame_rate = 30;
                     g_cfg.drop_frame = true;
