@@ -284,7 +284,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
          *                 HOUR                             MINS
          */
 
-        /* lower 8-bits contats data or flags */
+        /* lower 8-bits contains data or flags */
         uData = uRequest & SMPTE_DATA_MASK;
 
         switch((uRequest & SMPTE_REG_MASK) >> 8)
@@ -522,15 +522,18 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 uint16_t uiData[4];
                 uint16_t uiReply[4];
 
-                if (g_encoderEnabled)
-                    uReply |= SMPTE_ENCCTL_ENABLE;
-
                 if (g_bPostInterrupts)
                     uReply |= SMPTE_DECCTL_INT;
+
+                /* Serialize access to SMPTE data */
+                IArg key = GateMutex_enter(gateMutex0);
 
                 uiData[0] = uReply;
                 uiData[1] = ((g_rxTime.secs  << 4) | (g_rxTime.frame & 0xFF));
                 uiData[2] = ((g_rxTime.hours << 4) | (g_rxTime.mins  & 0xFF));
+
+                /* Release the gate mutex */
+                GateMutex_leave(gateMutex0, key);
 
                 /* Send the 48-bit reply word back */
                 transaction2.count = 3;

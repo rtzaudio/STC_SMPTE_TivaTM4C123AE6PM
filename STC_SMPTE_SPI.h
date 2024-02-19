@@ -58,7 +58,7 @@
 
 /* Register number bits */
 #define SMPTE_REG_MASK          0x0F00          /* C0-C3 register op-code      */
-#define SMPTE_DATA_MASK         0x000F          /* B0-B7 8-bits of data        */
+#define SMPTE_DATA_MASK         0x00FF          /* B0-B7 8-bits of data        */
 
 /* SMPTE Controller Registers (C0-C3) */
 #define SMPTE_REG_REVID         1               /* Rev=low nibble (RO, 16-bit) */

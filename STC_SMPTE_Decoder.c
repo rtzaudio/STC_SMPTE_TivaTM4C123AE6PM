@@ -266,11 +266,17 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Reverse all 64-bits in the data part of the SMPTE frame */
         word.raw.data = reverseBits64(word.raw.data);
 
+        /* Serialize access to SMPTE data */
+        IArg key = GateMutex_enter(gateMutex0);
+
         /* Now extract any time and other data from the packet */
         g_rxTime.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
         g_rxTime.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
         g_rxTime.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
         g_rxTime.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
+
+        /* Release the gate mutex */
+        GateMutex_leave(gateMutex0, key);
 
         /* Assert the interrupt line */
         if (g_bPostInterrupts)
@@ -463,7 +469,7 @@ void HandleEdgeChange(void)
 
     /* Normally we'd divide the period count by 80 here to get the pulse
      * time in microseconds. However, we scale all the other timing
-     * constants by 80 instead to avoid this divison. Now look at the
+     * constants by 80 instead to avoid this division. Now look at the
      * period and decide if the bit is a one or zero.
      */
     if ((g_uiPeriod >= ONE_TIME_MIN) && (g_uiPeriod < ONE_TIME_MAX))
