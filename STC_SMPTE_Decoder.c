@@ -268,13 +268,11 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
 
         /* Serialize access to SMPTE data */
         IArg key = GateMutex_enter(gateMutex0);
-
         /* Now extract any time and other data from the packet */
-        g_rxTime.frame = word.ltc.frame_units + (word.ltc.frame_tens * 10);
-        g_rxTime.secs  = word.ltc.secs_units  + (word.ltc.secs_tens  * 10);
-        g_rxTime.mins  = word.ltc.mins_units  + (word.ltc.mins_tens  * 10);
-        g_rxTime.hours = word.ltc.hours_units + (word.ltc.hours_tens * 10);
-
+        g_rxTime.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
+        g_rxTime.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
+        g_rxTime.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
+        g_rxTime.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
         /* Release the gate mutex */
         GateMutex_leave(gateMutex0, key);
 

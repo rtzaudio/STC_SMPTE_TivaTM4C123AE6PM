@@ -28,7 +28,7 @@
  *     |       |             |                       |
  *    R/W     RSVD          REG                  DATA/FLAGS
  *
- * The SMPTE_REG_DATA command register returns 48-bits of additional
+ * The SMPTE_REG_DATA command register returns an additional 32-bits
  * time code data containing the HH:MM:SS:FF as follows.
  *
  *   +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+

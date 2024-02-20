@@ -236,7 +236,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
         transaction1.txBuf = (Ptr)&uDummy;
         transaction1.rxBuf = (Ptr)&uRequest;
 
-        /* Send the SPI transaction */
+        /* Issue a SPI transaction to read a command word */
         success = SPI_transfer(hSlave, &transaction1);
 
         if (!success)
@@ -262,7 +262,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
          *    R/W     RSVD          REG                  DATA/FLAGS
          *
          *
-         * The SMPTE_REG_DATA command register returns and additional 32-bits
+         * The SMPTE_REG_DATA command register returns an additional 32-bits
          * of time code data containing the HH:MM:SS:FF as follows.
          *
          *   +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
@@ -482,7 +482,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
         case SMPTE_REG_STAT:
 
             /* ====================================================
-             * SMPTE STATUS REGISTER
+             * SMPTE STATUS REGISTER (RO)
              * ====================================================
              */
 
@@ -510,7 +510,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
         case SMPTE_REG_DATA:
 
             /* ====================================================
-             * SMPTE DATA REGISTER
+             * SMPTE DATA REGISTER (RO)
              * ====================================================
              */
 
@@ -529,8 +529,8 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 IArg key = GateMutex_enter(gateMutex0);
 
                 uiData[0] = uReply;
-                uiData[1] = ((g_rxTime.secs  << 4) | (g_rxTime.frame & 0xFF));
-                uiData[2] = ((g_rxTime.hours << 4) | (g_rxTime.mins  & 0xFF));
+                uiData[1] = (((uint16_t)g_rxTime.secs  << 8) | ((uint16_t)g_rxTime.frame & 0xFF));
+                uiData[2] = (((uint16_t)g_rxTime.hours << 8) | ((uint16_t)g_rxTime.mins  & 0xFF));
 
                 /* Release the gate mutex */
                 GateMutex_leave(gateMutex0, key);
