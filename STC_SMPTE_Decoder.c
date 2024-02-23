@@ -45,6 +45,7 @@
 #include <xdc/runtime/System.h>
 #include <xdc/runtime/Error.h>
 #include <xdc/runtime/Gate.h>
+#include <xdc/runtime/Memory.h>
 
 /* BIOS Header files */
 #include <ti/sysbios/BIOS.h>
@@ -54,6 +55,7 @@
 #include <ti/sysbios/knl/Task.h>
 #include <ti/sysbios/knl/Clock.h>
 #include <ti/sysbios/knl/Queue.h>
+#include <ti/sysbios/knl/Swi.h>
 //#include <ti/sysbios/hal/Timer.h>
 #include <ti/sysbios/family/arm/m3/Hwi.h>
 
@@ -108,17 +110,25 @@
 
 #define DEBUG_SMPTE     0
 
+#define MAX_QUEUE       8
+
 /* SMPTE 80-bit frame buffer */
-typedef struct ltcframe_t {
+typedef struct _LTCFrameBits {
     uint64_t data;              /* 64-bits data */
     uint16_t sync;              /* 16-bits sync */
-} ltcframe_t;                   /* 80-bit frame */
+} LTCFrameBits;                 /* 80-bit frame */
 
 /* Access as struct members or raw bit form */
-typedef union LTCFrameWord_t {
-    LTCFrame    ltc;            /* members form */
-    ltcframe_t  raw;            /* raw bit form */
+typedef union _LTCFrameWord {
+    LTCFrame        ltc;        /* members form */
+    LTCFrameBits    raw;        /* raw bit form */
 } LTCFrameWord;
+
+/* SMPTE word queue element */
+typedef struct _LTCWordElem {
+    Queue_Elem      elem;
+    LTCFrameWord    word;       /* SMPTE word */
+} LTCWordElem;
 
 /*** SMPTE Decoder variables ***/
 
@@ -138,7 +148,7 @@ volatile bool     g_bFirstTransition = false;
 const uint64_t sync_word_fwd = 0b0011111111111101;
 const uint64_t sync_word_rev = 0b1011111111111100;
 
-static ltcframe_t g_smpteWord;
+static LTCFrameBits g_smpteWord;
 
 /* Hwi_Struct for timer interrupt handlers */
 static Hwi_Struct wtimer0AHwiStruct;
@@ -166,10 +176,15 @@ static uint64_t reverseBits64(uint64_t x);
 
 void SMPTE_initDecoder(void)
 {
+    Int i;
+
     Error_Block eb;
     Hwi_Params  hwiParams;
     Task_Params taskParams;
     Mailbox_Params mboxParams;
+    LTCWordElem* msg;
+    LTCWordElem* queBuf;
+    Queue_Handle queWord;
 
     /* Create INT_WTIMER0 hardware interrupt handlers */
 
@@ -194,7 +209,28 @@ void SMPTE_initDecoder(void)
     Mailbox_Params_init(&mboxParams);
     mailboxWord = Mailbox_create(sizeof(LTCFrameWord), 32, &mboxParams, &eb);
     if (mailboxWord == NULL) {
-        System_abort("Mailbox create failed\nAborting...");
+        System_abort("Mailbox create failed");
+    }
+
+    /*
+     * Allocate and initialize RECEIVE buffer memory
+     */
+
+    queWord = Queue_create(NULL, NULL);
+    if (queWord == NULL) {
+        System_abort("Queue create failed");
+    }
+
+    Error_init(&eb);
+    queBuf = (LTCWordElem*)Memory_alloc(NULL, sizeof(LTCWordElem) * MAX_QUEUE, 0, &eb);
+    if (queBuf == NULL)
+        System_abort("RxBuf allocation failed");
+
+    msg = queBuf;
+
+    /* Put all tx message buffers on the freeQueue */
+    for (i=0; i < MAX_QUEUE; i++, msg++) {
+        Queue_enqueue(queWord, (Queue_Elem*)msg);
     }
 
     /* Create the SMPTE packet decoder task */
