@@ -104,7 +104,6 @@
 #include "Board.h"
 #include "STC_SMPTE.h"
 #include "STC_SMPTE_SPI.h"
-#include "libltc\ltc.h"
 
 /*** Data Types and Constants ***/
 
@@ -114,8 +113,8 @@
 
 /* SMPTE 80-bit frame buffer */
 typedef struct _LTCFrameBits {
-    uint64_t data;              /* 64-bits data */
-    uint16_t sync;              /* 16-bits sync */
+    uint64_t        data;       /* 64-bits data */
+    uint16_t        sync;       /* 16-bits sync */
 } LTCFrameBits;                 /* 80-bit frame */
 
 /* Access as struct members or raw bit form */
@@ -124,12 +123,6 @@ typedef union _LTCFrameWord {
     LTCFrameBits    raw;        /* raw bit form */
 } LTCFrameWord;
 
-/* SMPTE word queue element */
-typedef struct _LTCWordElem {
-    Queue_Elem      elem;
-    LTCFrameWord    word;       /* SMPTE word */
-} LTCWordElem;
-
 /*** SMPTE Decoder variables ***/
 
 bool g_decoderEnabled = false;
@@ -137,6 +130,7 @@ bool g_bPostInterrupts = false;
 
 SMPTETimecode g_rxTime;
 
+volatile uint32_t g_PingPong = 0;
 volatile uint32_t g_uiPeriod = 0;
 volatile uint32_t g_uiHighCount = 0;
 volatile uint32_t g_uiLowCount = 0;
@@ -148,7 +142,7 @@ volatile bool     g_bFirstTransition = false;
 const uint64_t sync_word_fwd = 0b0011111111111101;
 const uint64_t sync_word_rev = 0b1011111111111100;
 
-static LTCFrameBits g_smpteWord;
+static LTCFrameWord g_smpteFrameBuf[2];
 
 /* Hwi_Struct for timer interrupt handlers */
 static Hwi_Struct wtimer0AHwiStruct;
@@ -176,15 +170,10 @@ static uint64_t reverseBits64(uint64_t x);
 
 void SMPTE_initDecoder(void)
 {
-    Int i;
-
     Error_Block eb;
     Hwi_Params  hwiParams;
     Task_Params taskParams;
     Mailbox_Params mboxParams;
-    LTCWordElem* msg;
-    LTCWordElem* queBuf;
-    Queue_Handle queWord;
 
     /* Create INT_WTIMER0 hardware interrupt handlers */
 
@@ -210,27 +199,6 @@ void SMPTE_initDecoder(void)
     mailboxWord = Mailbox_create(sizeof(LTCFrameWord), 32, &mboxParams, &eb);
     if (mailboxWord == NULL) {
         System_abort("Mailbox create failed");
-    }
-
-    /*
-     * Allocate and initialize RECEIVE buffer memory
-     */
-
-    queWord = Queue_create(NULL, NULL);
-    if (queWord == NULL) {
-        System_abort("Queue create failed");
-    }
-
-    Error_init(&eb);
-    queBuf = (LTCWordElem*)Memory_alloc(NULL, sizeof(LTCWordElem) * MAX_QUEUE, 0, &eb);
-    if (queBuf == NULL)
-        System_abort("RxBuf allocation failed");
-
-    msg = queBuf;
-
-    /* Put all tx message buffers on the freeQueue */
-    for (i=0; i < MAX_QUEUE; i++, msg++) {
-        Queue_enqueue(queWord, (Queue_Elem*)msg);
     }
 
     /* Create the SMPTE packet decoder task */
@@ -304,11 +272,13 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
 
         /* Serialize access to SMPTE data */
         IArg key = GateMutex_enter(gateMutex0);
+
         /* Now extract any time and other data from the packet */
         g_rxTime.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
         g_rxTime.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
         g_rxTime.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
         g_rxTime.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
+
         /* Release the gate mutex */
         GateMutex_leave(gateMutex0, key);
 
@@ -337,8 +307,13 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
 
 Void SMPTE_Decoder_Reset(void)
 {
-    g_smpteWord.data = (uint64_t)0;
-    g_smpteWord.sync = (uint16_t)0;
+    size_t i;
+
+    for(i=0; i < sizeof(g_smpteFrameBuf)/sizeof(LTCFrameBits); i++)
+    {
+        g_smpteFrameBuf[i].raw.data = (uint64_t)0;
+        g_smpteFrameBuf[i].raw.sync = (uint16_t)0;
+    }
 
     g_nBitState = 0;
     g_bFirstTransition = false;
@@ -347,6 +322,11 @@ Void SMPTE_Decoder_Reset(void)
     g_uiLowCount  = 0;
     g_uiHighCount = 0;
     g_rxBitCount  = 0;
+}
+
+SMPTETimecode* SMPTE_GetTime(void)
+{
+    return &g_rxTime;
 }
 
 //*****************************************************************************
@@ -535,37 +515,45 @@ void HandleEdgeChange(void)
 
     if (new_bit_flag)
     {
+        LTCFrameBits* frame = &g_smpteFrameBuf[g_PingPong].raw;
+
         /* Shift the 16-bit sync word bits */
-        g_smpteWord.sync = g_smpteWord.sync << 1;
+        frame->sync = frame->sync << 1;
 
         /* Carry bit-63 into sync bit-0 if needed, otherwise it's a zero bit */
-        if (g_smpteWord.data & 0x8000000000000000)
-            g_smpteWord.sync |= 1;
+        if (frame->data & 0x8000000000000000)
+            frame->sync |= 1;
 
         /* Shift the 80-bit frame word bits */
-        g_smpteWord.data = g_smpteWord.data << 1;
+        frame->data = frame->data << 1;
 
         /* Add in new smpte word bit, either zero or a one */
         if (g_nBitState)
-            g_smpteWord.data |= 1;
+            frame->data |= 1;
 
         /* The 16-bit SMPTE sync word must be at the end of the frame
          * to consider it a valid 80-bit SMPTE frame.
          */
         if (++g_rxBitCount >= LTC_FRAME_BIT_COUNT)
         {
-            if (g_smpteWord.sync == sync_word_fwd)
+            if (frame->sync == sync_word_fwd)
             {
                 /* Post the 64-bit SMPTE word to decode task */
-                Mailbox_post(mailboxWord, &g_smpteWord, BIOS_NO_WAIT);
+                Mailbox_post(mailboxWord, frame, BIOS_NO_WAIT);
+
+                /* toggle the ping-pong buffer index */
+                g_PingPong ^= 1;
 
                 /* Reset bit counter and buffer */
                 g_rxBitCount = 0;
             }
-            else if (g_smpteWord.sync == sync_word_rev)
+            else if (frame->sync == sync_word_rev)
             {
                 /* Post the 64-bit SMPTE word to decode task */
-                Mailbox_post(mailboxWord, &g_smpteWord, BIOS_NO_WAIT);
+                Mailbox_post(mailboxWord, frame, BIOS_NO_WAIT);
+
+                /* toggle the ping-pong buffer index */
+                g_PingPong ^= 1;
 
                 /* Reset bit counter and buffer */
                 g_rxBitCount = 0;

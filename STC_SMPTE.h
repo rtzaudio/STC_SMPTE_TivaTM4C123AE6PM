@@ -48,6 +48,9 @@
  * eprom as normal. This provides a means to force run time config defaults
  * to be reset or not.
  */
+
+#include "libltc\ltc.h"
+
 #define FIRMWARE_VER        2           /* firmware version */
 #define FIRMWARE_REV        33        	/* firmware revision */
 #define FIRMWARE_BUILD      1           /* firmware build number */
@@ -123,5 +126,6 @@ void SMPTE_initDecoder(void);
 int SMPTE_Decoder_Start();
 int SMPTE_Decoder_Stop(void);
 void SMPTE_Decoder_Reset(void);
+SMPTETimecode* SMPTE_GetTime(void);
 
 /* End-Of-File */

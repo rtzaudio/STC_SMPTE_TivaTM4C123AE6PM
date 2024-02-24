@@ -103,7 +103,6 @@
 #include "Board.h"
 #include "STC_SMPTE.h"
 #include "STC_SMPTE_SPI.h"
-#include "libltc\ltc.h"
 
 /* Constants and Macros */
 
@@ -510,7 +509,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
         case SMPTE_REG_DATA:
 
             /* ====================================================
-             * SMPTE DATA REGISTER (RO)
+             * SMPTE INT DATA REGISTER (RO)
              * ====================================================
              */
 
