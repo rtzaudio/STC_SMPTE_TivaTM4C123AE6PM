@@ -391,7 +391,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
         case SMPTE_REG_DECCTL:
 
             /* ====================================================
-             * SMPTE GENERATOR CONTROL REGISTER (RW)
+             * SMPTE DECODER CONTROL REGISTER (RW)
              * ====================================================
              */
 
@@ -464,7 +464,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 /* Start the SMPTE generator if enable flag set */
                 if (uRequest & SMPTE_DECCTL_ENABLE)
                 {
-                    /* Reset frame counts on requested */
+                    /* Reset frame counts if requested */
                     if (uRequest & SMPTE_DECCTL_RESET)
                         SMPTE_Decoder_Reset();
 

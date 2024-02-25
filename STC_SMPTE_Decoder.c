@@ -109,8 +109,6 @@
 
 #define DEBUG_SMPTE     0
 
-#define MAX_QUEUE       8
-
 /* SMPTE 80-bit frame buffer */
 typedef struct _LTCFrameBits {
     uint64_t        data;       /* 64-bits data */
@@ -176,7 +174,6 @@ void SMPTE_initDecoder(void)
     Mailbox_Params mboxParams;
 
     /* Create INT_WTIMER0 hardware interrupt handlers */
-
     Error_init(&eb);
     Hwi_Params_init(&hwiParams);
     Hwi_construct(&(wtimer0AHwiStruct), INT_WTIMER0A, WTimer0AHwi, &hwiParams, &eb);
@@ -185,7 +182,6 @@ void SMPTE_initDecoder(void)
     }
 
     /* Create INT_WTIMER0B hardware interrupt handler */
-
     Error_init(&eb);
     Hwi_Params_init(&hwiParams);
     Hwi_construct(&(wtimer0BHwiStruct), INT_WTIMER0B, WTimer0BHwi, &hwiParams, &eb);
@@ -207,98 +203,6 @@ void SMPTE_initDecoder(void)
     taskParams.stackSize = 2048;
     taskParams.priority  = 10;
     Task_create((Task_FuncPtr)DecodeTaskFxn, &taskParams, &eb);
-}
-
-//*****************************************************************************
-// SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
-//*****************************************************************************
-
-uint64_t reverseBits64(uint64_t x)
-{
-    unsigned int s = sizeof(x) * 8;
-    uint64_t mask = ~((uint64_t)0);
-
-    while ((s >>= 1) > 0)
-    {
-        mask ^= mask << s;
-        x = ((x >> s) & mask) | ((x << s) & ~mask);
-    }
-
-    return x;
-}
-
-//*****************************************************************************
-// This task decodes 80-bit SMPTE packets fed to it from the edge interrupt
-// handlers. Once a valid packet sync word is found in the stream, the 64-bit
-// word is passed to this task to extract and decode all the time and other
-// information to provide the main SPI host task with the time code
-// information needed via an SPI interrupt.
-//*****************************************************************************
-
-Void DecodeTaskFxn(UArg arg0, UArg arg1)
-{
-#if (DEBUG_SMPTE > 0)
-    uint8_t secs = 0;
-#endif
-    LTCFrameWord word;
-
-    /* Initialize and start edge decode interrupts */
-    SMPTE_Decoder_Start();
-
-    /*
-     * Loop waiting for SMPTE word packets to arrive
-     */
-
-    while (true)
-    {
-        /* Wait for an 80-bit timecode word */
-        if (!Mailbox_pend(mailboxWord, &word, 100))
-        {
-            GPIO_write(Board_STAT_LED, Board_LED_ON);
-            continue;
-        }
-
-        /* Toggle the LED on each packet received */
-        GPIO_toggle(Board_STAT_LED);
-
-        /* Set direction indicator pin */
-        if (word.ltc.sync_word == sync_word_rev)
-            GPIO_write(Board_DIRECTION, PIN_HIGH);
-        else
-            GPIO_write(Board_DIRECTION, PIN_LOW);
-
-        /* Reverse all 64-bits in the data part of the SMPTE frame */
-        word.raw.data = reverseBits64(word.raw.data);
-
-        /* Serialize access to SMPTE data */
-        IArg key = GateMutex_enter(gateMutex0);
-
-        /* Now extract any time and other data from the packet */
-        g_rxTime.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
-        g_rxTime.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
-        g_rxTime.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
-        g_rxTime.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
-
-        /* Release the gate mutex */
-        GateMutex_leave(gateMutex0, key);
-
-        /* Assert the interrupt line */
-        if (g_bPostInterrupts)
-        {
-            /* Notify host a packet is ready */
-            GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
-        }
-
-#if (DEBUG_SMPTE > 0)
-        if (secs != tc.secs)
-        {
-            secs = tc.secs;
-
-            System_printf("%2u:%2u:%2u:%2u\n", tc.hours, tc.mins, tc.secs, tc.frame);
-            System_flush();
-        }
-#endif
-    }
 }
 
 //*****************************************************************************
@@ -400,9 +304,6 @@ int SMPTE_Decoder_Start(void)
 
 int SMPTE_Decoder_Stop(void)
 {
-    g_bPostInterrupts = false;
-    g_decoderEnabled = false;
-
     /* Disable both Timer A and Timer B */
     TimerDisable(WTIMER0_BASE, TIMER_BOTH);
 
@@ -423,6 +324,9 @@ int SMPTE_Decoder_Stop(void)
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
     GPIO_write(Board_DIRECTION, PIN_LOW);
     GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+
+    g_bPostInterrupts = false;
+    g_decoderEnabled = false;
 
     return 1;
 }
@@ -538,27 +442,110 @@ void HandleEdgeChange(void)
         {
             if (frame->sync == sync_word_fwd)
             {
-                /* Post the 64-bit SMPTE word to decode task */
-                Mailbox_post(mailboxWord, frame, BIOS_NO_WAIT);
-
                 /* toggle the ping-pong buffer index */
                 g_PingPong ^= 1;
 
-                /* Reset bit counter and buffer */
-                g_rxBitCount = 0;
-            }
-            else if (frame->sync == sync_word_rev)
-            {
                 /* Post the 64-bit SMPTE word to decode task */
                 Mailbox_post(mailboxWord, frame, BIOS_NO_WAIT);
-
-                /* toggle the ping-pong buffer index */
-                g_PingPong ^= 1;
 
                 /* Reset bit counter and buffer */
                 g_rxBitCount = 0;
             }
         }
+    }
+}
+
+//*****************************************************************************
+// SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
+//*****************************************************************************
+
+uint64_t reverseBits64(uint64_t x)
+{
+    unsigned int s = sizeof(x) * 8;
+    uint64_t mask = ~((uint64_t)0);
+
+    while ((s >>= 1) > 0)
+    {
+        mask ^= mask << s;
+        x = ((x >> s) & mask) | ((x << s) & ~mask);
+    }
+
+    return x;
+}
+
+//*****************************************************************************
+// This task decodes 80-bit SMPTE packets fed to it from the edge interrupt
+// handlers. Once a valid packet sync word is found in the stream, the 64-bit
+// word is passed to this task to extract and decode all the time and other
+// information to provide the main SPI host task with the time code
+// information needed via an SPI interrupt.
+//*****************************************************************************
+
+Void DecodeTaskFxn(UArg arg0, UArg arg1)
+{
+#if (DEBUG_SMPTE > 0)
+    uint8_t secs = 0;
+#endif
+    LTCFrameWord word;
+
+    /* Initialize and start edge decode interrupts */
+    SMPTE_Decoder_Start();
+
+    /*
+     * Loop waiting for SMPTE word packets to arrive
+     */
+
+    while (true)
+    {
+        /* Wait for an 80-bit timecode word */
+        if (!Mailbox_pend(mailboxWord, &word, 100))
+        {
+            GPIO_write(Board_STAT_LED, Board_LED_ON);
+            continue;
+        }
+
+        /* Toggle the LED on each packet received */
+        GPIO_toggle(Board_STAT_LED);
+
+        /* Set direction indicator pin */
+        if (word.ltc.sync_word == sync_word_rev)
+            GPIO_write(Board_DIRECTION, PIN_HIGH);
+        else
+            GPIO_write(Board_DIRECTION, PIN_LOW);
+
+        /* Reverse all 64-bits in the data part of the SMPTE frame */
+        word.raw.data = reverseBits64(word.raw.data);
+
+        /* Serialize access to SMPTE data */
+        IArg key = GateMutex_enter(gateMutex0);
+
+        /* Now extract any time and other data from the packet */
+        g_rxTime.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
+        g_rxTime.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
+        g_rxTime.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
+        g_rxTime.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
+
+        /* Release the gate mutex */
+        GateMutex_leave(gateMutex0, key);
+
+        /* Assert the interrupt line */
+        if (g_bPostInterrupts)
+        {
+            /* Notify host a packet is ready */
+            GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
+        }
+
+#if (DEBUG_SMPTE > 0)
+        if (secs != g_rxTime.secs)
+        {
+            secs = g_rxTime.secs;
+
+            System_printf("%2.2u:%2.2u:%2.2u:%2.2u\n",
+                          g_rxTime.hours, g_rxTime.mins,
+                          g_rxTime.secs, g_rxTime.frame);
+            System_flush();
+        }
+#endif
     }
 }
 
