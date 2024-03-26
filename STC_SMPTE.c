@@ -184,6 +184,7 @@ Int main()
 Void SPI_SlaveTask(UArg a0, UArg a1)
 {
     bool success;
+    uint8_t  cmd;
     uint16_t uRequest;
     uint16_t uReply;
     uint16_t uDummy;
@@ -283,10 +284,17 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
          *                 HOUR                             MINS
          */
 
-        /* lower 8-bits contains data or flags */
+        /* Get the command portion bits */
+        cmd = SMPTE_REG_GET(uRequest);
+
+        /* The lower 8-bits contains data/flags */
         uData = uRequest & SMPTE_DATA_MASK;
 
-        switch((uRequest & SMPTE_REG_MASK) >> 8)
+        /*
+         * Handle the register command from the master
+         */
+
+        switch(cmd)
         {
         case SMPTE_REG_REVID:
 
