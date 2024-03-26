@@ -189,6 +189,8 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     uint16_t uReply;
     uint16_t uDummy;
     uint16_t uData;
+    uint16_t uiData[4];
+    uint16_t uiReply[4];
     SPI_Transaction transaction1;
     SPI_Transaction transaction2;
     SPI_Params spiParams;
@@ -526,18 +528,15 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 
             if (uRequest & SMPTE_F_READ)
             {
-                uint16_t uiData[4];
-                uint16_t uiReply[4];
-
                 if (g_bPostInterrupts)
                     uReply |= SMPTE_DECCTL_INT;
 
                 /* Serialize access to SMPTE data */
                 IArg key = GateMutex_enter(gateMutex0);
 
-                uiData[0] = uReply;
-                uiData[1] = (((uint16_t)g_rxTime.secs  << 8) | ((uint16_t)g_rxTime.frame & 0xFF));
-                uiData[2] = (((uint16_t)g_rxTime.hours << 8) | ((uint16_t)g_rxTime.mins  & 0xFF));
+                uiData[0] = 0xBEEF; //uReply;
+                uiData[1] = 0x1122; //(((uint16_t)g_rxTime.secs  << 8) | ((uint16_t)g_rxTime.frame & 0xFF));
+                uiData[2] = 0x3344; //(((uint16_t)g_rxTime.hours << 8) | ((uint16_t)g_rxTime.mins  & 0xFF));
 
                 /* Release the gate mutex */
                 GateMutex_leave(gateMutex0, key);
