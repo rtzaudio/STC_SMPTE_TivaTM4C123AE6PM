@@ -534,9 +534,13 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 /* Serialize access to SMPTE data */
                 IArg key = GateMutex_enter(gateMutex0);
 
-                uiData[0] = 0xBEEF; //uReply;
-                uiData[1] = 0x1122; //(((uint16_t)g_rxTime.secs  << 8) | ((uint16_t)g_rxTime.frame & 0xFF));
-                uiData[2] = 0x3344; //(((uint16_t)g_rxTime.hours << 8) | ((uint16_t)g_rxTime.mins  & 0xFF));
+                uiData[0] = uReply;
+                uiData[1] = (((uint16_t)g_rxTime.secs  << 8) | ((uint16_t)g_rxTime.frame & 0xFF));
+                uiData[2] = (((uint16_t)g_rxTime.hours << 8) | ((uint16_t)g_rxTime.mins  & 0xFF));
+
+                //uiData[0] = 0xA1A2;
+                //uiData[1] = 0xB1B2;
+                uiData[2] = 0xC1C2;
 
                 /* Release the gate mutex */
                 GateMutex_leave(gateMutex0, key);
