@@ -164,10 +164,8 @@ Int main()
     Error_init(&eb);
 
     Task_Params_init(&taskParams);
-
     taskParams.stackSize = 1500;
     taskParams.priority  = 10;
-
     if (Task_create(SPI_SlaveTask, &taskParams, &eb) == NULL)
         System_abort("SPI_SlaveTask!\n");
 
@@ -735,11 +733,8 @@ int32_t SysParamsRead(SYSCFG* sp)
     {
         System_printf("ERROR Reading System Parameters - Resetting Defaults...\n");
         System_flush();
-
         InitSysDefaults(sp);
-
         SysParamsWrite(sp);
-
         return -1;
     }
 
@@ -747,11 +742,8 @@ int32_t SysParamsRead(SYSCFG* sp)
     {
         System_printf("WARNING New Firmware Version - Resetting Defaults...\n");
         System_flush();
-
         InitSysDefaults(sp);
-
         SysParamsWrite(sp);
-
         return -1;
     }
 
@@ -759,11 +751,8 @@ int32_t SysParamsRead(SYSCFG* sp)
     {
         System_printf("WARNING New Firmware BUILD - Resetting Defaults...\n");
         System_flush();
-
         InitSysDefaults(sp);
-
         SysParamsWrite(sp);
-
         return -1;
     }
 
