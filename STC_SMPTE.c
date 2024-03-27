@@ -193,6 +193,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     SPI_Transaction transaction2;
     SPI_Params spiParams;
     SPI_Handle hSlave;
+    SMPTETimecode timecode;
 
     /* Read system parameters from EEPROM */
     //SysParamsRead(&g_cfg);
@@ -529,19 +530,19 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 if (g_bPostInterrupts)
                     uReply |= SMPTE_DECCTL_INT;
 
-                /* Serialize access to SMPTE data */
-                IArg key = GateMutex_enter(gateMutex0);
-
-                uiData[0] = uReply;
-                uiData[1] = (((uint16_t)g_rxTime.secs  << 8) | ((uint16_t)g_rxTime.frame & 0xFF));
-                uiData[2] = (((uint16_t)g_rxTime.hours << 8) | ((uint16_t)g_rxTime.mins  & 0xFF));
-
-                //uiData[0] = 0xA1A2;
-                //uiData[1] = 0xB1B2;
-                uiData[2] = 0xC1C2;
-
-                /* Release the gate mutex */
-                GateMutex_leave(gateMutex0, key);
+                /* Get next timecode packet to go out */
+                if (SMPTE_Get_Packet(&timecode))
+                {
+                    uiData[0] = uReply;
+                    uiData[1] = (((uint16_t)timecode.secs  << 8) | ((uint16_t)timecode.frame & 0xFF));
+                    uiData[2] = (((uint16_t)timecode.hours << 8) | ((uint16_t)timecode.mins  & 0xFF));
+                }
+                else
+                {
+                    uiData[0] = uReply;
+                    uiData[1] = 0;
+                    uiData[2] = 0;
+                }
 
                 /* Send the 48-bit reply word back */
                 transaction2.count = 3;

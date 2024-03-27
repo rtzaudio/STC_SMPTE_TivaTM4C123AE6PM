@@ -126,8 +126,6 @@ typedef union _LTCFrameWord {
 bool g_decoderEnabled = false;
 bool g_bPostInterrupts = false;
 
-SMPTETimecode g_rxTime;
-
 volatile uint32_t g_PingPong = 0;
 volatile uint32_t g_uiPeriod = 0;
 volatile uint32_t g_uiHighCount = 0;
@@ -147,6 +145,7 @@ static Hwi_Struct wtimer0AHwiStruct;
 static Hwi_Struct wtimer0BHwiStruct;
 
 static Mailbox_Handle mailboxWord = NULL;
+static Mailbox_Handle mailboxOut  = NULL;
 
 /*** External Data Items ***/
 
@@ -177,25 +176,29 @@ void SMPTE_initDecoder(void)
     Error_init(&eb);
     Hwi_Params_init(&hwiParams);
     Hwi_construct(&(wtimer0AHwiStruct), INT_WTIMER0A, WTimer0AHwi, &hwiParams, &eb);
-    if (Error_check(&eb)) {
+    if (Error_check(&eb))
         System_abort("Couldn't construct WTIMER0A error hwi");
-    }
 
     /* Create INT_WTIMER0B hardware interrupt handler */
     Error_init(&eb);
     Hwi_Params_init(&hwiParams);
     Hwi_construct(&(wtimer0BHwiStruct), INT_WTIMER0B, WTimer0BHwi, &hwiParams, &eb);
-    if (Error_check(&eb)) {
+    if (Error_check(&eb))
         System_abort("Couldn't construct WTIMER0B error hwi");
-    }
 
     /* Create SMPTE packet decoder mailbox */
     Error_init(&eb);
     Mailbox_Params_init(&mboxParams);
     mailboxWord = Mailbox_create(sizeof(LTCFrameWord), 32, &mboxParams, &eb);
-    if (mailboxWord == NULL) {
+    if (mailboxWord == NULL)
         System_abort("Mailbox create failed");
-    }
+
+    /* Create SMPTE packet out mailbox */
+    Error_init(&eb);
+    Mailbox_Params_init(&mboxParams);
+    mailboxOut = Mailbox_create(sizeof(SMPTETimecode), 32, &mboxParams, &eb);
+    if (mailboxOut == NULL)
+        System_abort("Mailbox create failed");
 
     /* Create the SMPTE packet decoder task */
     Error_init(&eb);
@@ -226,11 +229,6 @@ Void SMPTE_Decoder_Reset(void)
     g_uiLowCount  = 0;
     g_uiHighCount = 0;
     g_rxBitCount  = 0;
-}
-
-SMPTETimecode* SMPTE_GetTime(void)
-{
-    return &g_rxTime;
 }
 
 //*****************************************************************************
@@ -483,10 +481,8 @@ uint64_t reverseBits64(uint64_t x)
 
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
-#if (DEBUG_SMPTE > 0)
-    uint8_t secs = 0;
-#endif
     LTCFrameWord word;
+    SMPTETimecode timecode;
 
     /* Initialize and start edge decode interrupts */
     SMPTE_Decoder_Start();
@@ -516,37 +512,28 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Reverse all 64-bits in the data part of the SMPTE frame */
         word.raw.data = reverseBits64(word.raw.data);
 
-        /* Serialize access to SMPTE data */
-        IArg key = GateMutex_enter(gateMutex0);
-
         /* Now extract any time and other data from the packet */
-        g_rxTime.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
-        g_rxTime.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
-        g_rxTime.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
-        g_rxTime.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
-
-        /* Release the gate mutex */
-        GateMutex_leave(gateMutex0, key);
+        timecode.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
+        timecode.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
+        timecode.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
+        timecode.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
 
         /* Assert the interrupt line */
         if (g_bPostInterrupts)
         {
+            /* Post the 64-bit SMPTE word to decode task */
+            Mailbox_post(mailboxOut, &timecode, BIOS_NO_WAIT);
+
             /* Notify host a packet is ready */
             GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
         }
-
-#if (DEBUG_SMPTE > 0)
-        if (secs != g_rxTime.secs)
-        {
-            secs = g_rxTime.secs;
-
-            System_printf("%2.2u:%2.2u:%2.2u:%2.2u\n",
-                          g_rxTime.hours, g_rxTime.mins,
-                          g_rxTime.secs, g_rxTime.frame);
-            System_flush();
-        }
-#endif
     }
+}
+
+
+bool SMPTE_Get_Packet(SMPTETimecode* timecode)
+{
+    return Mailbox_pend(mailboxOut, timecode, BIOS_NO_WAIT);
 }
 
 /* End-Of-File */
