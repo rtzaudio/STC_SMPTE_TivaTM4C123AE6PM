@@ -74,7 +74,7 @@ extern "C" {
  */
 typedef enum STC_SMPTE_GPIOName {
     STC_SMPTE_IN = 0,               /* 0  = PC4 */
-    STC_SMPTE_BUSY,                 /* 1  = PA7 */
+    STC_SMPTE_BUSY_N,               /* 1  = PA7 */
 	STC_SMPTE_INT_N,	            /* 2  = PA6 */
     STC_SMPTE_OUT,                  /* 3  = PB6 */
     STC_SMPTE_MUTE,                 /* 4  = PB7 */

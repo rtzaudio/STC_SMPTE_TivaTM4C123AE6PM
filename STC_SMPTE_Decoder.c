@@ -241,8 +241,11 @@ int SMPTE_Decoder_Start(void)
     g_bPostInterrupts = false;
 
     GPIO_write(Board_STAT_LED, Board_LED_ON);
+    GPIO_write(Board_SMPTE_MUTE, PIN_HIGH);
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
     GPIO_write(Board_DIRECTION, PIN_LOW);
+    GPIO_write(Board_BUSY_N, PIN_HIGH);
+    GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
 
     SMPTE_Decoder_Reset();
 
@@ -290,9 +293,6 @@ int SMPTE_Decoder_Start(void)
     /* Enable both Timer A and Timer B to begin the application */
     TimerEnable(WTIMER0_BASE, TIMER_BOTH);
 
-    /* SMPTE input mute off */
-    GPIO_write(Board_SMPTE_MUTE, PIN_HIGH);
-
     return 1;
 }
 
@@ -322,6 +322,7 @@ int SMPTE_Decoder_Stop(void)
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
     GPIO_write(Board_DIRECTION, PIN_LOW);
     GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+    GPIO_write(Board_BUSY_N, PIN_HIGH);
 
     g_bPostInterrupts = false;
     g_decoderEnabled = false;

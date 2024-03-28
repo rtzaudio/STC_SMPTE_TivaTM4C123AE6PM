@@ -175,8 +175,8 @@ GPIO_PinConfig gpioPinConfigs[] = {
     /* (0) STC_SMPTE_IN */
     GPIOTiva_PC_4 | GPIO_CFG_INPUT,     //  | GPIO_CFG_IN_INT_BOTH_EDGES,
     /*=== Output pins ===*/
-    /* (1) STC_SMPTE_BUSY */
-    GPIOTiva_PA_7 | GPIO_CFG_OUT_OD_PU | GPIO_CFG_OUT_LOW,
+    /* (1) STC_SMPTE_BUSY_N */
+    GPIOTiva_PA_7 | GPIO_CFG_OUT_OD_PU | GPIO_CFG_OUT_HIGH,
     /* (2) STC_SMPTE_INT_N */
     GPIOTiva_PA_6 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
     /* (3) STC_SMPTE_OUT */

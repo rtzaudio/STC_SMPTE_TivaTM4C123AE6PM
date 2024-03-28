@@ -116,6 +116,8 @@ extern bool g_encoderEnabled;
 extern bool g_decoderEnabled;
 extern bool g_bPostInterrupts;
 
+bool SPI_transfer_sync(SPI_Handle handle, SPI_Transaction *transaction);
+
 //*****************************************************************************
 // Main Program Entry Point
 //*****************************************************************************
@@ -138,7 +140,7 @@ Int main()
 
     GPIO_write(Board_STAT_LED, Board_LED_ON);
     GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
-    GPIO_write(Board_BUSY, PIN_LOW);
+    GPIO_write(Board_BUSY_N, PIN_HIGH);
 
     /* WTIMER1 - SMPTE output generator
      * WTIMER0 - SMPTE input (64-bit timer option pins PC4 & PC5)
@@ -172,6 +174,29 @@ Int main()
     BIOS_start();    /* does not return */
 
     return 0;
+}
+
+//*****************************************************************************
+// This function handles any SPI transactions and sets the BUSY pin LOW
+// to indicate the SPI bus is currently in use. The master should monitor
+// and check the BUSY pin status before sending the slave any additional
+// commands on the SPI bus.
+//*****************************************************************************
+
+bool SPI_transfer_sync(SPI_Handle handle, SPI_Transaction *transaction)
+{
+    bool success;
+
+    /* Set BUSY pin low to indicate we're busy */
+    GPIO_write(Board_BUSY_N, PIN_LOW);
+
+    /* Send the SPI transaction */
+    success = SPI_transfer(handle, transaction);
+
+    /* Set BUSY back high to indicate not busy status */
+    GPIO_write(Board_BUSY_N, PIN_HIGH);
+
+    return success;
 }
 
 //*****************************************************************************
@@ -237,8 +262,8 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
         transaction1.txBuf = (Ptr)&uDummy;
         transaction1.rxBuf = (Ptr)&uRequest;
 
-        /* Issue a SPI transaction to read a command word */
-        success = SPI_transfer(hSlave, &transaction1);
+        /* Send the SPI transaction */
+        success = SPI_transfer_sync(hSlave, &transaction1);
 
         if (!success)
         {
@@ -312,7 +337,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             transaction2.rxBuf = (Ptr)&uDummy;
 
             /* Send the SPI transaction */
-            success = SPI_transfer(hSlave, &transaction2);
+            success = SPI_transfer_sync(hSlave, &transaction2);
             break;
 
         case SMPTE_REG_ENCCTL:
@@ -351,7 +376,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                success = SPI_transfer(hSlave, &transaction2);
+                success = SPI_transfer_sync(hSlave, &transaction2);
             }
             else
             {
@@ -436,7 +461,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                success = SPI_transfer(hSlave, &transaction2);
+                success = SPI_transfer_sync(hSlave, &transaction2);
             }
             else
             {
@@ -511,7 +536,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                success = SPI_transfer(hSlave, &transaction2);
+                success = SPI_transfer_sync(hSlave, &transaction2);
             }
             break;
 
@@ -550,7 +575,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uiReply;
 
                 /* Send the SPI transaction */
-                success = SPI_transfer(hSlave, &transaction2);
+                success = SPI_transfer_sync(hSlave, &transaction2);
             }
             break;
 
@@ -571,7 +596,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                success = SPI_transfer(hSlave, &transaction2);
+                success = SPI_transfer_sync(hSlave, &transaction2);
             }
             else
             {
@@ -599,7 +624,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                success = SPI_transfer(hSlave, &transaction2);
+                success = SPI_transfer_sync(hSlave, &transaction2);
             }
             else
             {
@@ -627,7 +652,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                success = SPI_transfer(hSlave, &transaction2);
+                success = SPI_transfer_sync(hSlave, &transaction2);
             }
             else
             {
@@ -655,7 +680,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 transaction2.rxBuf = (Ptr)&uDummy;
 
                 /* Send the SPI transaction */
-                success = SPI_transfer(hSlave, &transaction2);
+                success = SPI_transfer_sync(hSlave, &transaction2);
             }
             else
             {
