@@ -232,7 +232,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     spiParams.transferMode  = SPI_MODE_BLOCKING;
     spiParams.mode          = SPI_SLAVE;
     spiParams.frameFormat   = SPI_POL1_PHA0;
-    spiParams.bitRate       = 250000;
+    spiParams.bitRate       = 1000000;  //250000;
     spiParams.dataSize      = 16;
 
     hSlave = SPI_open(STC_SMPTE_SPI0, &spiParams);
