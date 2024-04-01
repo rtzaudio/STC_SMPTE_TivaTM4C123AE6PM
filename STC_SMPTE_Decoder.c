@@ -126,7 +126,6 @@ typedef union _LTCFrameWord {
 bool g_decoderEnabled = false;
 bool g_bPostInterrupts = false;
 
-volatile uint32_t g_PingPong = 0;
 volatile uint32_t g_uiPeriod = 0;
 volatile uint32_t g_uiHighCount = 0;
 volatile uint32_t g_uiLowCount = 0;
@@ -143,10 +142,10 @@ static Hwi_Struct wtimer0AHwiStruct;
 static Hwi_Struct wtimer0BHwiStruct;
 
 static Mailbox_Handle mailboxWord = NULL;
+static LTCFrameWord g_smpteFrameBuf;
 
-static LTCFrameWord g_smpteFrameBuf[2];
-
-SMPTETimecode g_timecode;
+uint32_t g_PingPong = 0;
+SMPTETimecode g_timecode[2];
 
 /*** External Data Items ***/
 
@@ -208,13 +207,8 @@ void SMPTE_initDecoder(void)
 
 Void SMPTE_Decoder_Reset(void)
 {
-    size_t i;
-
-    for(i=0; i < sizeof(g_smpteFrameBuf)/sizeof(LTCFrameBits); i++)
-    {
-        g_smpteFrameBuf[i].raw.data = (uint64_t)0;
-        g_smpteFrameBuf[i].raw.sync = (uint16_t)0;
-    }
+    g_smpteFrameBuf.raw.data = (uint64_t)0;
+    g_smpteFrameBuf.raw.sync = (uint16_t)0;
 
     g_nBitState = 0;
     g_bFirstTransition = false;
@@ -412,7 +406,7 @@ void HandleEdgeChange(void)
 
     if (new_bit_flag)
     {
-        LTCFrameBits* frame = &g_smpteFrameBuf[g_PingPong].raw;
+        LTCFrameBits* frame = &g_smpteFrameBuf.raw;
 
         /* Shift the 16-bit sync word bits */
         frame->sync = frame->sync << 1;
@@ -435,9 +429,6 @@ void HandleEdgeChange(void)
         {
             if (frame->sync == sync_word_fwd)
             {
-                /* toggle the ping-pong buffer index */
-                g_PingPong ^= 1;
-
                 /* Post the 64-bit SMPTE word to decode task */
                 Mailbox_post(mailboxWord, frame, BIOS_NO_WAIT);
 
@@ -506,11 +497,14 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Reverse all 64-bits in the data part of the SMPTE frame */
         word.raw.data = reverseBits64(word.raw.data);
 
+        SMPTETimecode* p = &g_timecode[g_PingPong];
+        g_PingPong ^= 0x01;
+
         /* Now extract any time and other data from the packet */
-        g_timecode.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
-        g_timecode.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
-        g_timecode.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
-        g_timecode.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
+        p->frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
+        p->secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
+        p->mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
+        p->hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
 
         /* Assert the interrupt line to notify host packet is ready  */
         if (g_bPostInterrupts)

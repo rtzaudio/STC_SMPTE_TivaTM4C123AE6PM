@@ -110,7 +110,9 @@
 SYSCFG g_cfg;
 uint32_t g_systemClock;
 
-extern SMPTETimecode g_timecode;
+/* External Data Items */
+extern uint32_t g_PingPong;
+extern SMPTETimecode g_timecode[2];
 extern SMPTETimecode g_txTime;
 extern bool g_encoderEnabled;
 extern bool g_decoderEnabled;
@@ -551,12 +553,14 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 
             if (uRequest & SMPTE_F_READ)
             {
+                SMPTETimecode* p = &g_timecode[g_PingPong ^ 0x01];
+
                 if (g_bPostInterrupts)
                     uReply |= SMPTE_DECCTL_INT;
 
                 uiData[0] = uReply;
-                uiData[1] = (((uint16_t)g_timecode.secs  << 8) | ((uint16_t)g_timecode.frame & 0xFF));
-                uiData[2] = (((uint16_t)g_timecode.hours << 8) | ((uint16_t)g_timecode.mins  & 0xFF));
+                uiData[1] = (((uint16_t)p->secs  << 8) | ((uint16_t)p->frame & 0xFF));
+                uiData[2] = (((uint16_t)p->hours << 8) | ((uint16_t)p->mins  & 0xFF));
 
                 /* Send the 48-bit reply word back */
                 transaction2.count = 3;
