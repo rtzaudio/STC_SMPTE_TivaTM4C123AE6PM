@@ -126,6 +126,5 @@ void SMPTE_initDecoder(void);
 int SMPTE_Decoder_Start();
 int SMPTE_Decoder_Stop(void);
 void SMPTE_Decoder_Reset(void);
-bool SMPTE_Get_Packet(SMPTETimecode* timecode);
 
 /* End-Of-File */

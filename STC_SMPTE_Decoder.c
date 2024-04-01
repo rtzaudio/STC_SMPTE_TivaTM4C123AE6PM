@@ -138,14 +138,15 @@ volatile bool     g_bFirstTransition = false;
 const uint64_t sync_word_fwd = 0b0011111111111101;
 const uint64_t sync_word_rev = 0b1011111111111100;
 
-static LTCFrameWord g_smpteFrameBuf[2];
-
 /* Hwi_Struct for timer interrupt handlers */
 static Hwi_Struct wtimer0AHwiStruct;
 static Hwi_Struct wtimer0BHwiStruct;
 
 static Mailbox_Handle mailboxWord = NULL;
-static Mailbox_Handle mailboxOut  = NULL;
+
+static LTCFrameWord g_smpteFrameBuf[2];
+
+SMPTETimecode g_timecode;
 
 /*** External Data Items ***/
 
@@ -191,13 +192,6 @@ void SMPTE_initDecoder(void)
     Mailbox_Params_init(&mboxParams);
     mailboxWord = Mailbox_create(sizeof(LTCFrameWord), 32, &mboxParams, &eb);
     if (mailboxWord == NULL)
-        System_abort("Mailbox create failed");
-
-    /* Create SMPTE packet out mailbox */
-    Error_init(&eb);
-    Mailbox_Params_init(&mboxParams);
-    mailboxOut = Mailbox_create(sizeof(SMPTETimecode), 32, &mboxParams, &eb);
-    if (mailboxOut == NULL)
         System_abort("Mailbox create failed");
 
     /* Create the SMPTE packet decoder task */
@@ -483,7 +477,6 @@ uint64_t reverseBits64(uint64_t x)
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
     LTCFrameWord word;
-    SMPTETimecode timecode;
 
     /* Initialize and start edge decode interrupts */
     SMPTE_Decoder_Start();
@@ -514,27 +507,17 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         word.raw.data = reverseBits64(word.raw.data);
 
         /* Now extract any time and other data from the packet */
-        timecode.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
-        timecode.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
-        timecode.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
-        timecode.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
+        g_timecode.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
+        g_timecode.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
+        g_timecode.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
+        g_timecode.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
 
-        /* Assert the interrupt line */
+        /* Assert the interrupt line to notify host packet is ready  */
         if (g_bPostInterrupts)
         {
-            /* Post the 64-bit SMPTE word to decode task */
-            Mailbox_post(mailboxOut, &timecode, BIOS_NO_WAIT);
-
-            /* Notify host a packet is ready */
             GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
         }
     }
-}
-
-
-bool SMPTE_Get_Packet(SMPTETimecode* timecode)
-{
-    return Mailbox_pend(mailboxOut, timecode, BIOS_NO_WAIT);
 }
 
 /* End-Of-File */

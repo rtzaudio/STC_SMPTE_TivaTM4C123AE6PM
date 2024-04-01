@@ -110,7 +110,7 @@
 SYSCFG g_cfg;
 uint32_t g_systemClock;
 
-extern SMPTETimecode g_rxTime;
+extern SMPTETimecode g_timecode;
 extern SMPTETimecode g_txTime;
 extern bool g_encoderEnabled;
 extern bool g_decoderEnabled;
@@ -218,7 +218,6 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     SPI_Transaction transaction2;
     SPI_Params spiParams;
     SPI_Handle hSlave;
-    SMPTETimecode timecode;
 
     /* Read system parameters from EEPROM */
     //SysParamsRead(&g_cfg);
@@ -555,19 +554,9 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                 if (g_bPostInterrupts)
                     uReply |= SMPTE_DECCTL_INT;
 
-                /* Get next timecode packet to go out */
-                if (SMPTE_Get_Packet(&timecode))
-                {
-                    uiData[0] = uReply;
-                    uiData[1] = (((uint16_t)timecode.secs  << 8) | ((uint16_t)timecode.frame & 0xFF));
-                    uiData[2] = (((uint16_t)timecode.hours << 8) | ((uint16_t)timecode.mins  & 0xFF));
-                }
-                else
-                {
-                    uiData[0] = uReply;
-                    uiData[1] = 0;
-                    uiData[2] = 0;
-                }
+                uiData[0] = uReply;
+                uiData[1] = (((uint16_t)g_timecode.secs  << 8) | ((uint16_t)g_timecode.frame & 0xFF));
+                uiData[2] = (((uint16_t)g_timecode.hours << 8) | ((uint16_t)g_timecode.mins  & 0xFF));
 
                 /* Send the 48-bit reply word back */
                 transaction2.count = 3;
