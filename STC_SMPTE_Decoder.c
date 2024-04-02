@@ -144,8 +144,7 @@ static Hwi_Struct wtimer0BHwiStruct;
 static Mailbox_Handle mailboxWord = NULL;
 static LTCFrameWord g_smpteFrameBuf;
 
-uint32_t g_PingPong = 0;
-SMPTETimecode g_timecode[2];
+SMPTETimecode g_timecode;
 
 /*** External Data Items ***/
 
@@ -468,6 +467,7 @@ uint64_t reverseBits64(uint64_t x)
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
     LTCFrameWord word;
+    uint32_t key;
 
     /* Initialize and start edge decode interrupts */
     SMPTE_Decoder_Start();
@@ -497,14 +497,13 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Reverse all 64-bits in the data part of the SMPTE frame */
         word.raw.data = reverseBits64(word.raw.data);
 
-        SMPTETimecode* p = &g_timecode[g_PingPong];
-        g_PingPong ^= 0x01;
-
         /* Now extract any time and other data from the packet */
-        p->frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
-        p->secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
-        p->mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
-        p->hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
+        key = GateMutex_enter(gateMutex0);
+        g_timecode.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
+        g_timecode.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
+        g_timecode.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
+        g_timecode.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
+        GateMutex_leave(gateMutex0, key);
 
         /* Assert the interrupt line to notify host packet is ready  */
         if (g_bPostInterrupts)
