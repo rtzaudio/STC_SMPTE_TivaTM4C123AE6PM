@@ -89,6 +89,27 @@
 #define FPS25_REF           500
 #define FPS30_REF           417
 
+/*** LTCFrame Queue Elements ***********************************************/
+
+typedef struct _LTCFrameElement {
+    Queue_Elem  elem;
+    LTCFrame    frame;
+} LTCFrameElement;
+
+typedef struct _LTCFrameQueue {
+    /* queues and semaphores */
+    Queue_Handle        free_queue;
+    Semaphore_Handle    free_semaphore;
+    Queue_Handle        data_queue;
+    Semaphore_Handle    data_semaphore;
+    /* server data items */
+    int                 num_free_messages;
+    int                 error_count;
+    uint32_t            count;
+    /* frame memory buffers */
+    LTCFrameElement*    buf;
+} LTCFrameQueue;
+
 /*** System Structures *****************************************************/
 
 /* This structure contains runtime and program configuration data that is

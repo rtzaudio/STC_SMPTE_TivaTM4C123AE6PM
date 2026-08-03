@@ -781,4 +781,129 @@ int32_t SysParamsRead(SYSCFG* sp)
     return 0;
 }
 
+
+
+
+#include "smpte_ltc.h"
+
+extern SMPTE_Decoder *SMPTE_HW_getDecoder(void);
+
+static void ltcConsumerTaskFxn(UArg a0, UArg a1)
+{
+    SMPTE_Decoder *dec = SMPTE_HW_getDecoder();
+    SMPTE_Timecode local;
+    bool     wasSignalPresent = true;
+    bool     wasTimedOut      = false;
+    uint32_t lastBadSyncCount = 0;
+
+    for (;;) {
+        if (dec->frameReady) {
+            UInt key = Hwi_disable();
+            local = dec->tc;
+            dec->frameReady = false;
+            Hwi_restore(key);
+
+            System_printf("%02u:%02u:%02u:%02u%s [%s]\n",
+                          local.hours, local.minutes,
+                          local.seconds, local.frames,
+                          local.dropFrame ? " DF" : "",
+                          local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
+        }
+
+        if (dec->signalPresent != wasSignalPresent) {
+            wasSignalPresent = dec->signalPresent;
+            if (!wasSignalPresent) {
+                System_printf("LTC: edges present but failing to classify\n");
+            }
+        }
+
+        if (dec->timedOut != wasTimedOut) {
+            wasTimedOut = dec->timedOut;
+            if (wasTimedOut) {
+                System_printf("LTC: signal lost -- no edges (timeout #%u)\n",
+                              dec->timeoutCount);
+            } else {
+                System_printf("LTC: signal recovered\n");
+            }
+        }
+
+        if (dec->badSyncCount != lastBadSyncCount) {
+            lastBadSyncCount = dec->badSyncCount;
+            System_printf("LTC: framing anomaly (total: %u)\n", dec->badSyncCount);
+        }
+
+        /* Frames arrive every ~33-42ms depending on fps; 5ms poll gives
+         * comfortable margin without burning cycles. */
+        Task_sleep(5);
+    }
+}
+
+
+
+
+#if 0
+#include "smpte_ltc.h"
+
+extern SMPTE_Decoder *SMPTE_HW_getDecoder(void);
+
+static void ltcConsumerTaskFxn(UArg a0, UArg a1)
+{
+    SMPTE_Decoder *dec = SMPTE_HW_getDecoder();
+    SMPTE_Timecode local;
+    bool     wasSignalPresent = true;
+    bool     wasTimedOut      = false;
+    uint32_t lastBadSyncCount = 0;
+
+    for (;;) {
+        if (dec->frameReady) {
+            UInt key = Hwi_disable();
+            local = dec->tc;
+            dec->frameReady = false;
+            Hwi_restore(key);
+
+            System_printf("%02u:%02u:%02u:%02u%s [%s]\n",
+                          local.hours, local.minutes,
+                          local.seconds, local.frames,
+                          local.dropFrame ? " DF" : "",
+                          local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
+        }
+
+        if (dec->signalPresent != wasSignalPresent) {
+            wasSignalPresent = dec->signalPresent;
+            if (!wasSignalPresent) {
+                System_printf("LTC: edges present but failing to classify\n");
+            }
+        }
+
+        if (dec->timedOut != wasTimedOut) {
+            wasTimedOut = dec->timedOut;
+            if (wasTimedOut) {
+                System_printf("LTC: signal lost -- no edges (timeout #%u)\n",
+                              dec->timeoutCount);
+            } else {
+                System_printf("LTC: signal recovered\n");
+            }
+        }
+
+        if (dec->badSyncCount != lastBadSyncCount) {
+            lastBadSyncCount = dec->badSyncCount;
+            System_printf("LTC: framing anomaly (total: %u)\n", dec->badSyncCount);
+        }
+
+        /* Frames arrive every ~33-42ms depending on fps; 5ms poll gives
+         * comfortable margin without burning cycles. */
+        Task_sleep(5);
+    }
+}
+
+void SMPTE_Task_create(void)
+{
+    Task_Params params;
+    Task_Params_init(&params);
+    params.stackSize = 1024;
+    params.priority   = 2;
+    Task_create(ltcConsumerTaskFxn, &params, NULL);
+}
+#endif
+
 /* End-Of-File */
