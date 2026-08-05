@@ -23,8 +23,18 @@
  * => half-bit rate = 4000 Hz => timer period = 250 us.
  *
  * For 30 fps (SMPTE non-drop): 80*30 = 2400 bit/s => half-bit = 4800 Hz
- * For 29.97 drop-frame, use the same 30fps structure with drop-frame flag
- * bit set and frame-number skipping logic (not shown here for brevity).
+ *
+ * DROP-FRAME (29.97 fps) SUPPORT
+ * -------------------------------
+ * 29.97 fps drop-frame timecode is transmitted using the same bit structure
+ * as 30 fps (LTC_FPS must be set to 30 when LTC_DROP_FRAME is enabled) but:
+ *   1. The drop-frame flag bit (bit 10) is set to 1.
+ *   2. Frame numbers 0 and 1 are skipped at the start of every minute,
+ *      EXCEPT minutes that are exact multiples of 10 (00, 10, 20, 30, 40, 50).
+ * This drops 2 frames x 9 minutes-per-10 = 18 counted frames every 10
+ * minutes, which compensates for the ~0.1% difference between a 30 fps
+ * count and real 29.97 fps video -- no video frames are ever actually
+ * dropped, only frame *numbers* in the timecode count.
  *
  * LTC 80-BIT FRAME LAYOUT (25fps EBU, bit 0 first transmitted):
  *   bits 0-3   : Frame units (BCD)
@@ -55,33 +65,82 @@
  * ============================================================================
  */
 
-#include <stdint.h>
-#include <string.h>
-
-/* TI-RTOS / SYS-BIOS headers */
 #include <xdc/std.h>
 #include <xdc/cfg/global.h>
 #include <xdc/runtime/System.h>
 #include <xdc/runtime/Error.h>
 #include <xdc/runtime/Gate.h>
-#include <xdc/runtime/Memory.h>
-#include <ti/sysbios/BIOS.h>
-#include <ti/sysbios/hal/Timer.h>
-#include <ti/sysbios/hal/Hwi.h>
 
-/* TI-RTOS driver headers (board-specific: adjust include to your BSP) */
+/* BIOS Header files */
+#include <ti/sysbios/BIOS.h>
+#include <ti/sysbios/knl/Semaphore.h>
+#include <ti/sysbios/knl/Event.h>
+#include <ti/sysbios/knl/Mailbox.h>
+#include <ti/sysbios/knl/Task.h>
+#include <ti/sysbios/knl/Clock.h>
+#include <ti/sysbios/knl/Queue.h>
+#include <ti/sysbios/hal/Timer.h>
+#include <ti/sysbios/family/arm/m3/Hwi.h>
+
+/* TI-RTOS Driver files */
 #include <ti/drivers/GPIO.h>
+#include <ti/drivers/SPI.h>
+#include <ti/drivers/I2C.h>
+#include <ti/drivers/UART.h>
+
+/* Tivaware Driver files */
+#include <driverlib/eeprom.h>
+#include <driverlib/fpu.h>
+#include <driverlib/rom.h>
+#include <driverlib/rom_map.h>
+#include <driverlib/adc.h>
+#include <driverlib/can.h>
+#include <driverlib/debug.h>
+#include <driverlib/gpio.h>
+#include <driverlib/pin_map.h>
+#include <driverlib/ssi.h>
+#include <driverlib/i2c.h>
+#include <driverlib/qei.h>
+#include <driverlib/interrupt.h>
+#include <driverlib/pwm.h>
+#include <driverlib/sysctl.h>
+#include <driverlib/systick.h>
+#include <driverlib/timer.h>
+#include <driverlib/uart.h>
+
+#include <inc/hw_ints.h>
+#include <inc/hw_memmap.h>
+#include <inc/hw_sysctl.h>
+#include <inc/hw_types.h>
+#include <inc/hw_ssi.h>
+#include <inc/hw_i2c.h>
+#include <inc/hw_timer.h>
+
+/* Generic Includes */
+#include <file.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdbool.h>
+
 #include "Board.h"          /* Board_LTC_OUT must be defined in Board.h  */
 
 /* ------------------------------------------------------------------------ */
 /* Configuration                                                            */
 /* ------------------------------------------------------------------------ */
-#define LTC_FPS              25          /* frame rate: 25, 24, or 30      */
+#define LTC_FPS              30          /* frame rate: 25, 24, or 30      */
+#define LTC_DROP_FRAME       1           /* 1 = 29.97 drop-frame, 0 = normal.
+                                           * NOTE: drop-frame requires
+                                           * LTC_FPS == 30 (the timecode is
+                                           * still counted in 30ths; only
+                                           * the frame *numbering* drops).  */
 #define LTC_BITS_PER_FRAME   80
 #define LTC_BIT_RATE         (LTC_BITS_PER_FRAME * LTC_FPS)     /* bits/s  */
 #define LTC_HALFBIT_RATE_HZ  (LTC_BIT_RATE * 2)                 /* Hz      */
 
-#define LTC_GPIO_OUT         Board_SMPTE_OUT   /* GPIO pin driving the LTC line */
+/* GPIO pin driving the LTC line */
+#define LTC_GPIO_OUT         Board_SMPTE_OUT
 
 /* Sync word for 80-bit LTC frame (bits 64-79), transmitted LSB first */
 #define LTC_SYNC_WORD        0x3FFDu
@@ -107,6 +166,7 @@ static volatile uint8_t  gHalfBitPos = 0;   /* 0 = start-of-bit, 1 = mid-bit*/
 static volatile uint8_t  gLineLevel  = 0;   /* current output level 0/1    */
 
 static Timer_Handle gTimerHandle;
+static volatile Bool gRunning = FALSE;   /* TRUE while the timer/ISR is active */
 
 /* ------------------------------------------------------------------------ */
 /* Forward declarations                                                     */
@@ -114,6 +174,9 @@ static Timer_Handle gTimerHandle;
 static void LTC_buildFrame(SMPTE_Time *t, uint8_t frameBits[LTC_BITS_PER_FRAME]);
 static void LTC_advanceTimecode(volatile SMPTE_Time *t);
 static void LTC_timerHwi(UArg arg);
+void LTC_start(void);
+void LTC_stop(void);
+Bool LTC_isRunning(void);
 
 /* ============================================================================
  * LTC_buildFrame
@@ -128,17 +191,18 @@ static void LTC_buildFrame(SMPTE_Time *t, uint8_t frameBits[LTC_BITS_PER_FRAME])
 
     uint8_t frameUnits = t->frames % 10;
     uint8_t frameTens  = t->frames / 10;
-    uint8_t secUnits   = t->seconds % 10;
-    uint8_t secTens    = t->seconds / 10;
-    uint8_t minUnits   = t->minutes % 10;
-    uint8_t minTens    = t->minutes / 10;
-    uint8_t hourUnits  = t->hours % 10;
-    uint8_t hourTens   = t->hours / 10;
+    uint8_t secUnits    = t->seconds % 10;
+    uint8_t secTens     = t->seconds / 10;
+    uint8_t minUnits    = t->minutes % 10;
+    uint8_t minTens     = t->minutes / 10;
+    uint8_t hourUnits   = t->hours % 10;
+    uint8_t hourTens    = t->hours / 10;
+
+    int _i;
 
     /* helper macro: write 'nbits' LSB-first from value 'v' starting at 'pos' */
     #define WRITE_BITS(pos, v, nbits) \
         do { \
-            int _i; \
             for (_i = 0; _i < (nbits); _i++) { \
                 frameBits[(pos) + _i] = ((v) >> _i) & 0x1; \
             } \
@@ -146,7 +210,7 @@ static void LTC_buildFrame(SMPTE_Time *t, uint8_t frameBits[LTC_BITS_PER_FRAME])
 
     WRITE_BITS(0,  frameUnits, 4);   /* bits 0-3   */
     WRITE_BITS(8,  frameTens,  2);   /* bits 8-9   */
-    frameBits[10] = 0;               /* drop-frame flag (0 = non-drop)     */
+    frameBits[10] = LTC_DROP_FRAME ? 1 : 0;  /* drop-frame flag             */
     frameBits[11] = 0;               /* color frame flag                   */
 
     WRITE_BITS(16, secUnits, 4);     /* bits 16-19 */
@@ -171,7 +235,9 @@ static void LTC_buildFrame(SMPTE_Time *t, uint8_t frameBits[LTC_BITS_PER_FRAME])
  * LTC_advanceTimecode
  *
  * Increments frames/seconds/minutes/hours with rollover, called once per
- * completed 80-bit frame.
+ * completed 80-bit frame. When LTC_DROP_FRAME is enabled, applies the
+ * SMPTE drop-frame rule at each minute boundary: frame numbers 0 and 1 are
+ * skipped unless the new minute is a multiple of 10.
  * ============================================================================
  */
 static void LTC_advanceTimecode(volatile SMPTE_Time *t)
@@ -190,6 +256,16 @@ static void LTC_advanceTimecode(volatile SMPTE_Time *t)
                     t->hours = 0;
                 }
             }
+
+#if LTC_DROP_FRAME
+            /* New minute has just begun (seconds==0, frames==0). Skip
+             * frame numbers 0 and 1 unless this minute is a multiple
+             * of 10 -- e.g. at 00:01:00;00 the count jumps straight to
+             * 00:01:00;02, but 00:10:00;00 is NOT skipped. */
+            if ((t->minutes % 10) != 0) {
+                t->frames = 2;
+            }
+#endif
         }
     }
 }
@@ -239,6 +315,9 @@ static void LTC_timerHwi(UArg arg)
             snapshot.frames  = gTimecode.frames;
 
             LTC_buildFrame(&snapshot, gFrameBits);
+
+            /* Toggle the LED on each packet received */
+            GPIO_toggle(Board_STAT_LED);
         }
     }
 }
@@ -246,8 +325,9 @@ static void LTC_timerHwi(UArg arg)
 /* ============================================================================
  * LTC_init
  *
- * Sets up the GPIO output and creates+starts the periodic Timer that drives
- * the biphase-mark bitstream at LTC_HALFBIT_RATE_HZ.
+ * Sets up the GPIO output and creates (but does not start) the periodic
+ * Timer that will drive the biphase-mark bitstream at LTC_HALFBIT_RATE_HZ.
+ * Call LTC_start() afterward to actually begin transmitting.
  * ============================================================================
  */
 Bool LTC_init(void)
@@ -269,7 +349,9 @@ Bool LTC_init(void)
     Timer_Params_init(&timerParams);
     timerParams.periodType = Timer_PeriodType_MICROSECS;
     timerParams.period     = 1000000UL / LTC_HALFBIT_RATE_HZ; /* us per half-bit */
-    timerParams.startMode  = Timer_StartMode_AUTO;
+    /* USER start mode: the timer is created in the stopped state so the
+     * generator does not begin transmitting until LTC_start() is called. */
+    timerParams.startMode  = Timer_StartMode_USER;
     timerParams.runMode    = Timer_RunMode_CONTINUOUS;
 
     /* Timer_ANY lets SYS/BIOS pick a free hardware timer instance; pin a
@@ -282,11 +364,84 @@ Bool LTC_init(void)
         return FALSE;
     }
 
-    System_printf("LTC_init: LTC generator running at %d fps, "
-                  "half-bit rate %d Hz (period %d us)\n",
-                  LTC_FPS, LTC_HALFBIT_RATE_HZ, timerParams.period);
+    gRunning = FALSE;
+
+    System_printf("LTC_init: LTC generator ready (%d fps%s), "
+                  "half-bit rate %d Hz (period %d us). Call LTC_start() "
+                  "to begin.\n",
+                  LTC_FPS, LTC_DROP_FRAME ? " drop-frame" : "",
+                  LTC_HALFBIT_RATE_HZ, timerParams.period);
 
     return TRUE;
+}
+
+/* ============================================================================
+ * LTC_start
+ *
+ * Begins (or resumes) LTC transmission. Resets the bit/half-bit state so
+ * playback always restarts cleanly at the beginning of a bit, rather than
+ * possibly resuming mid-bit from wherever a previous LTC_stop() left off.
+ * Safe to call from task context; a no-op if already running.
+ * ============================================================================
+ */
+void LTC_start(void)
+{
+    if (!gRunning)
+    {
+        /* Initialize variables for start state */
+        UInt key = Hwi_disable();
+        gBitIndex   = 0;
+        gHalfBitPos = 0;
+        gLineLevel  = 0;
+        /* Set output to low state initially */
+        GPIO_write(LTC_GPIO_OUT, 0);
+        Hwi_restore(key);
+
+        /* Turn the LED on to indicate active */
+        GPIO_write(Board_STAT_LED, Board_LED_ON);
+
+        /* Enable the signal out relay to connect the SMPTE
+         * output signal to channel 24 on the tape machine.
+         */
+        GPIO_write(Board_RELAY, Board_RELAY_ON);
+        Task_sleep(50);
+
+        Timer_start(gTimerHandle);
+        gRunning = TRUE;
+    }
+}
+
+/* ============================================================================
+ * LTC_stop
+ *
+ * Halts the timer/ISR and drives the output line to a known idle (low)
+ * state. The current timecode value in gTimecode is preserved, so a
+ * subsequent LTC_start() resumes counting from where it left off (use
+ * LTC_setTime() first if you instead want to jam to a new value).
+ * Safe to call from task context; a no-op if already stopped.
+ * ============================================================================
+ */
+void LTC_stop(void)
+{
+    if (gRunning)
+    {
+        Timer_stop(gTimerHandle);
+        gRunning = FALSE;
+        /* SMPTE output pin low */
+        GPIO_write(LTC_GPIO_OUT, PIN_LOW);
+        /* Relay and status LED off */
+        GPIO_write(Board_RELAY, Board_RELAY_OFF);
+        GPIO_write(Board_STAT_LED, Board_LED_ON);
+    }
+}
+
+/* ============================================================================
+ * LTC_isRunning -- returns TRUE if the generator is currently transmitting.
+ * ============================================================================
+ */
+Bool LTC_isRunning(void)
+{
+    return gRunning;
 }
 
 /* ============================================================================
