@@ -151,17 +151,6 @@ Int main()
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOG);
 
-    /* Map the timer interrupt handlers. We don't make sys/bios calls
-     * from these interrupt handlers and there is no need to create a
-     * context handler with stack swapping for these. These handlers
-     * just update some globals variables and need to execute as
-     * quickly and efficiently as possible.
-     */
-    Hwi_plug(INT_WTIMER1A, WTimer1AIntHandler);
-    Hwi_plug(INT_WTIMER1B, WTimer1BIntHandler);
-    //Hwi_plug(INT_WTIMER0A, WTimer0AIntHandler);
-    //Hwi_plug(INT_WTIMER0B, WTimer0BIntHandler);
-
     /* Now start the main application button polling task */
 
     Error_init(&eb);
@@ -241,14 +230,8 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     if (hSlave == NULL)
         System_abort("Error initializing SPI0\n");
 
-    /****************************************************************
-     * Enter the main application button processing loop forever.
-     ****************************************************************/
-
-    /* Reset the SMPTE encoder and decoder */
-    SMPTE_Encoder_Reset();
-
-    /* Startup the packet decoder task and interrupts */
+    /* Initialize the encoder and decoder */
+    SMPTE_initEncoder();
     SMPTE_initDecoder();
 
     /*

@@ -137,11 +137,10 @@ int32_t SysParamsWrite(SYSCFG* sp);
 int32_t SysParamsRead(SYSCFG* sp);
 Void SPI_SlaveTask(UArg a0, UArg a1);
 
+void SMPTE_initEncoder(void);
 int SMPTE_Encoder_Start();
 int SMPTE_Encoder_Stop(void);
 void SMPTE_Encoder_Reset(void);
-Void WTimer1AIntHandler(UArg arg);
-Void WTimer1BIntHandler(UArg arg);
 
 void SMPTE_initDecoder(void);
 int SMPTE_Decoder_Start();

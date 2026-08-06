@@ -94,6 +94,13 @@
 #include <inc/hw_i2c.h>
 #include <inc/hw_timer.h>
 
+/* Generic Includes */
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdbool.h>
+
 #include "smpte_ltc.h"
 
 /* Ignore intervals shorter than this -- electrical glitch / contact bounce

@@ -45,7 +45,7 @@
 #include <xdc/runtime/System.h>
 #include <xdc/runtime/Error.h>
 #include <xdc/runtime/Gate.h>
-
+#include <xdc/runtime/Memory.h>
 /* BIOS Header files */
 #include <ti/sysbios/BIOS.h>
 #include <ti/sysbios/knl/Semaphore.h>
@@ -56,33 +56,17 @@
 #include <ti/sysbios/knl/Queue.h>
 //#include <ti/sysbios/hal/Timer.h>
 #include <ti/sysbios/family/arm/m3/Hwi.h>
-
 /* TI-RTOS Driver files */
 #include <ti/drivers/GPIO.h>
 #include <ti/drivers/SPI.h>
 #include <ti/drivers/I2C.h>
 #include <ti/drivers/UART.h>
-
 /* Tivaware Driver files */
-#include <driverlib/eeprom.h>
-#include <driverlib/fpu.h>
-#include <driverlib/rom.h>
-#include <driverlib/rom_map.h>
-#include <driverlib/adc.h>
-#include <driverlib/can.h>
-#include <driverlib/debug.h>
-#include <driverlib/gpio.h>
-#include <driverlib/pin_map.h>
-#include <driverlib/ssi.h>
-#include <driverlib/i2c.h>
-#include <driverlib/qei.h>
 #include <driverlib/interrupt.h>
-#include <driverlib/pwm.h>
 #include <driverlib/sysctl.h>
 #include <driverlib/systick.h>
 #include <driverlib/timer.h>
-#include <driverlib/uart.h>
-
+/* Tivaware Driver Peripherals */
 #include <inc/hw_ints.h>
 #include <inc/hw_memmap.h>
 #include <inc/hw_sysctl.h>
@@ -90,7 +74,6 @@
 #include <inc/hw_ssi.h>
 #include <inc/hw_i2c.h>
 #include <inc/hw_timer.h>
-
 /* Generic Includes */
 #include <file.h>
 #include <stdio.h>
@@ -98,7 +81,6 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
-
 /* XDCtools Header files */
 #include "Board.h"
 #include "STC_SMPTE.h"
@@ -122,9 +104,25 @@ static LTCFrame g_txFrame;
 extern SYSCFG g_cfg;
 extern uint32_t g_systemClock;
 
+/* Interrupt Handlers */
+static Void WTimer1AIntHandler(UArg arg);
+
 //*****************************************************************************
 //********************** SMPTE ENCODER SUPPORT ********************************
 //*****************************************************************************
+
+void SMPTE_initEncoder(void)
+{
+    /* Map the timer interrupt handlers. We don't make sys/bios calls
+     * from these interrupt handlers and there is no need to create a
+     * context handler with stack swapping for these. These handlers
+     * just update some globals variables and need to execute as
+     * quickly and efficiently as possible.
+     */
+    Hwi_plug(INT_WTIMER1A, WTimer1AIntHandler);
+
+    SMPTE_Encoder_Reset();
+}
 
 void SMPTE_Encoder_Reset(void)
 {
@@ -134,9 +132,9 @@ void SMPTE_Encoder_Reset(void)
     /* Set default time zone */
     strcpy(g_txTime.timezone, g_cfg.timezone);
 
-  //g_txTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
-  //g_txTime.months = 1;        /* valid months are 1..12            */
-  //g_txTime.days   = 1;        /* day of month 1..31                */
+    g_txTime.years  = 0;        /* LTC date uses 2-digit year 00-99  */
+    g_txTime.months = 1;        /* valid months are 1..12            */
+    g_txTime.days   = 1;        /* day of month 1..31                */
 
     g_txTime.hours  = 0;        /* hour 0..23                        */
     g_txTime.mins   = 0;        /* minute 0..60                      */
@@ -166,7 +164,6 @@ int SMPTE_Encoder_Start(void)
      * 25 fps = 4000Hz
      * 30 fps = 4800Hz
      */
-
     switch(g_cfg.frame_rate)
     {
     case 24:
@@ -194,22 +191,17 @@ int SMPTE_Encoder_Start(void)
     g_txBitCount = 0;
     g_txHalfBit = 0;
     g_encoderEnabled = true;
-    Hwi_restore(key);
-
     /* Pre-load the state of the first bit in the frame */
     g_txBitState = FRAME_GETBIT(((uint8_t*)&g_txFrame), g_txBitCount);
+    Hwi_restore(key);
 
     /* Turn the LED on initially, we toggle this as frames go out */
     GPIO_write(Board_STAT_LED, Board_LED_ON);
-
-    /* Enable the signal out relay to connect the SMPTE
-     * output signal to channel 24 on the tape machine.
-     */
-    GPIO_write(Board_RELAY, Board_RELAY_ON);
-    Task_sleep(50);
-
     /* SMPTE output pin low initially */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
+    /* Enable relay to connect SMPTE output to line amp */
+    GPIO_write(Board_RELAY, Board_RELAY_ON);
+    Task_sleep(50);
 
     /* Set TIMER_A clock rate */
     TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock/clockrate);
@@ -243,7 +235,6 @@ int SMPTE_Encoder_Stop(void)
 
     /* SMPTE output pin low */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
-
     /* Relay off */
     GPIO_write(Board_RELAY, Board_RELAY_OFF);
     GPIO_write(Board_STAT_LED, Board_LED_ON);
@@ -252,8 +243,9 @@ int SMPTE_Encoder_Stop(void)
 
     return 1;
 }
+
 //*****************************************************************************
-// SMPTE Generator WTIMER Interrupt Handler
+// WTIMER1A Interrupt Handler
 //*****************************************************************************
 
 Void WTimer1AIntHandler(UArg arg)
@@ -303,12 +295,6 @@ Void WTimer1AIntHandler(UArg arg)
         /* Increment the frame bit counter */
         ++g_txBitCount;
     }
-}
-
-Void WTimer1BIntHandler(UArg arg)
-{
-    /* Clear the timer interrupt flag */
-    TimerIntClear(WTIMER1_BASE, TIMER_TIMB_TIMEOUT);
 }
 
 /* End-Of-File */
