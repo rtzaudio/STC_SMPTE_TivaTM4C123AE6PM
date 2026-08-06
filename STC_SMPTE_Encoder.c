@@ -108,13 +108,15 @@
 #define FRAME_GETBIT(framebuf, bitnum)    ( (((framebuf[bitnum / 8]) >> (bitnum % 8)) & 0x01) )
 
 /* SMPTE Encoder variables */
-bool g_encoderEnabled = false;
-uint8_t  g_txBitState = 0;
-uint8_t  g_txHalfBit = 0;
-uint32_t g_txBitCount = 0;
-uint32_t g_txFrameCount = 0;
+volatile bool     g_encoderEnabled = false;
+volatile uint8_t  g_txBitState = 0;
+volatile uint8_t  g_txHalfBit = 0;
+volatile uint32_t g_txBitCount = 0;
+volatile uint32_t g_txFrameCount = 0;
+
 SMPTETimecode g_txTime;
-LTCFrame g_txFrame;
+
+static LTCFrame g_txFrame;
 
 /* Global Config variables */
 extern SYSCFG g_cfg;
@@ -156,9 +158,6 @@ int SMPTE_Encoder_Start(void)
     if (g_encoderEnabled)
         return -1;
 
-    /* Turn the LED on to indicate active */
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-
     /* Set the starting time members in the SMPTE tx frame buffer */
     ltc_time_to_frame(&g_txFrame, &g_txTime, LTC_TV_525_60, 0);
 
@@ -174,17 +173,14 @@ int SMPTE_Encoder_Start(void)
         /* 24 fps */
         clockrate = 3840;
         break;
-
     case 25:
         /* 25 fps */
         clockrate = 4000;
         break;
-
     case 30:
         /* 30 fps */
         clockrate = 4800;
         break;
-
     default:
         /* default to 30 fps */
         g_cfg.frame_rate = 30;
@@ -192,13 +188,19 @@ int SMPTE_Encoder_Start(void)
         break;
     }
 
+    /* Initialize variables for start state */
+    UInt key = Hwi_disable();
     g_txFrameCount = 0;
     g_txBitCount = 0;
     g_txHalfBit = 0;
     g_encoderEnabled = true;
+    Hwi_restore(key);
 
     /* Pre-load the state of the first bit in the frame */
     g_txBitState = FRAME_GETBIT(((uint8_t*)&g_txFrame), g_txBitCount);
+
+    /* Turn the LED on initially, we toggle this as frames go out */
+    GPIO_write(Board_STAT_LED, Board_LED_ON);
 
     /* Enable the signal out relay to connect the SMPTE
      * output signal to channel 24 on the tape machine.
@@ -211,13 +213,10 @@ int SMPTE_Encoder_Start(void)
 
     /* Set TIMER_A clock rate */
     TimerLoadSet(WTIMER1_BASE, TIMER_A, g_systemClock/clockrate);
-
     /* Configure the WTIMER1A interrupt for timer timeout */
     TimerIntEnable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
     /* Enable the TIMER1B interrupt on the processor (NVIC) */
     IntEnable(INT_WTIMER1A);
-
     /* Enable TIMER1A */
     TimerEnable(WTIMER1_BASE, TIMER_A);
 
@@ -235,13 +234,10 @@ int SMPTE_Encoder_Stop(void)
 
     /* Disable TIMER1A */
     TimerDisable(WTIMER1_BASE, TIMER_A);
-
     /* Disable the TIMER1A interrupt */
     IntDisable(INT_WTIMER1A);
-
     /* Turn off TIMER1B interrupt */
     TimerIntDisable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
-
     /* Clear any pending interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
 

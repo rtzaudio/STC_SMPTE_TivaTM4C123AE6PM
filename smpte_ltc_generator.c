@@ -78,47 +78,27 @@
 #include <ti/sysbios/knl/Mailbox.h>
 #include <ti/sysbios/knl/Task.h>
 #include <ti/sysbios/knl/Clock.h>
-#include <ti/sysbios/knl/Queue.h>
 #include <ti/sysbios/hal/Timer.h>
+#include <ti/sysbios/knl/Queue.h>
 #include <ti/sysbios/family/arm/m3/Hwi.h>
 
 /* TI-RTOS Driver files */
 #include <ti/drivers/GPIO.h>
 #include <ti/drivers/SPI.h>
-#include <ti/drivers/I2C.h>
-#include <ti/drivers/UART.h>
-
 /* Tivaware Driver files */
 #include <driverlib/eeprom.h>
 #include <driverlib/fpu.h>
-#include <driverlib/rom.h>
-#include <driverlib/rom_map.h>
-#include <driverlib/adc.h>
-#include <driverlib/can.h>
 #include <driverlib/debug.h>
 #include <driverlib/gpio.h>
 #include <driverlib/pin_map.h>
-#include <driverlib/ssi.h>
-#include <driverlib/i2c.h>
-#include <driverlib/qei.h>
 #include <driverlib/interrupt.h>
-#include <driverlib/pwm.h>
 #include <driverlib/sysctl.h>
 #include <driverlib/systick.h>
 #include <driverlib/timer.h>
-#include <driverlib/uart.h>
-
 #include <inc/hw_ints.h>
-#include <inc/hw_memmap.h>
-#include <inc/hw_sysctl.h>
-#include <inc/hw_types.h>
-#include <inc/hw_ssi.h>
-#include <inc/hw_i2c.h>
 #include <inc/hw_timer.h>
 
 /* Generic Includes */
-#include <file.h>
-#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <ctype.h>
@@ -346,11 +326,11 @@ Bool LTC_init(void)
     gHalfBitPos = 0;
     gLineLevel  = 0;
 
+    /* USER start mode: the timer is created in the stopped state so the
+     * generator does not begin transmitting until LTC_start() is called. */
     Timer_Params_init(&timerParams);
     timerParams.periodType = Timer_PeriodType_MICROSECS;
     timerParams.period     = 1000000UL / LTC_HALFBIT_RATE_HZ; /* us per half-bit */
-    /* USER start mode: the timer is created in the stopped state so the
-     * generator does not begin transmitting until LTC_start() is called. */
     timerParams.startMode  = Timer_StartMode_USER;
     timerParams.runMode    = Timer_RunMode_CONTINUOUS;
 
@@ -367,8 +347,7 @@ Bool LTC_init(void)
     gRunning = FALSE;
 
     System_printf("LTC_init: LTC generator ready (%d fps%s), "
-                  "half-bit rate %d Hz (period %d us). Call LTC_start() "
-                  "to begin.\n",
+                  "half-bit rate %d Hz (period %d us).\n",
                   LTC_FPS, LTC_DROP_FRAME ? " drop-frame" : "",
                   LTC_HALFBIT_RATE_HZ, timerParams.period);
 
@@ -406,6 +385,7 @@ void LTC_start(void)
         GPIO_write(Board_RELAY, Board_RELAY_ON);
         Task_sleep(50);
 
+        /* Start the timer to begin shifting data out */
         Timer_start(gTimerHandle);
         gRunning = TRUE;
     }
@@ -454,12 +434,10 @@ Bool LTC_isRunning(void)
 void LTC_setTime(uint8_t hours, uint8_t minutes, uint8_t seconds, uint8_t frames)
 {
     UInt key = Hwi_disable();
-
     gTimecode.hours   = hours;
     gTimecode.minutes = minutes;
     gTimecode.seconds = seconds;
     gTimecode.frames  = frames;
-
     Hwi_restore(key);
 }
 

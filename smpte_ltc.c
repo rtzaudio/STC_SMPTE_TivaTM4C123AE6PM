@@ -42,7 +42,58 @@
  * capture before relying on it.
  */
 
-#include <string.h>
+/* Generic Includes */
+#include <xdc/std.h>
+#include <xdc/cfg/global.h>
+#include <xdc/runtime/System.h>
+#include <xdc/runtime/Error.h>
+#include <xdc/runtime/Gate.h>
+
+/* BIOS Header files */
+#include <ti/sysbios/BIOS.h>
+#include <ti/sysbios/knl/Semaphore.h>
+#include <ti/sysbios/knl/Event.h>
+#include <ti/sysbios/knl/Mailbox.h>
+#include <ti/sysbios/knl/Task.h>
+#include <ti/sysbios/knl/Clock.h>
+#include <ti/sysbios/knl/Queue.h>
+//#include <ti/sysbios/hal/Timer.h>
+#include <ti/sysbios/family/arm/m3/Hwi.h>
+
+/* TI-RTOS Driver files */
+#include <ti/drivers/GPIO.h>
+#include <ti/drivers/SPI.h>
+#include <ti/drivers/I2C.h>
+#include <ti/drivers/UART.h>
+
+/* Tivaware Driver files */
+#include <driverlib/eeprom.h>
+#include <driverlib/fpu.h>
+#include <driverlib/rom.h>
+#include <driverlib/rom_map.h>
+#include <driverlib/adc.h>
+#include <driverlib/can.h>
+#include <driverlib/debug.h>
+#include <driverlib/gpio.h>
+#include <driverlib/pin_map.h>
+#include <driverlib/ssi.h>
+#include <driverlib/i2c.h>
+#include <driverlib/qei.h>
+#include <driverlib/interrupt.h>
+#include <driverlib/pwm.h>
+#include <driverlib/sysctl.h>
+#include <driverlib/systick.h>
+#include <driverlib/timer.h>
+#include <driverlib/uart.h>
+
+#include <inc/hw_ints.h>
+#include <inc/hw_memmap.h>
+#include <inc/hw_sysctl.h>
+#include <inc/hw_types.h>
+#include <inc/hw_ssi.h>
+#include <inc/hw_i2c.h>
+#include <inc/hw_timer.h>
+
 #include "smpte_ltc.h"
 
 /* Ignore intervals shorter than this -- electrical glitch / contact bounce

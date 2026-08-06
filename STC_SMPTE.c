@@ -496,7 +496,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                     break;
                 }
 
-                /* Start the SMPTE generator if enable flag set */
+                /* Start the SMPTE decoder if enable flag set */
                 if (uRequest & SMPTE_DECCTL_ENABLE)
                 {
                     /* Reset frame counts if requested */
