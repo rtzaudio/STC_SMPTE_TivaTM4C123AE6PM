@@ -116,28 +116,34 @@
 #include "Board.h"
 #include "STC_SMPTE.h"
 
-#include "smpte_ltc.h"
-
-static SMPTE_Decoder gLtcDecoder;
-static uint32_t      gTimerHz;
-static Hwi_Struct    gCaptureHwiStruct;
-static Clock_Struct  gWatchdogClockStruct;
-static bool          gRunning = false;
-
 /* Wide Timer 0 sub-timer A is natively 32-bit in capture mode -- no
- * prescale extension needed, unlike the standard-timer version. */
+ * prescale extension needed, unlike the standard-timer version.
+ */
+
 #define SMPTE_CAPTURE_TICK_MASK   0xFFFFFFFFu
 
 /* Watchdog tuning: declare signal loss after this many ms with zero
  * edges. Comfortably above any real LTC half-bit period (~200-2000us)
  * with margin for slow-motion scrubbing; tighten it if your application
- * needs a faster "signal lost" reaction. */
+ * needs a faster "signal lost" reaction.
+ */
+
 #define SMPTE_WATCHDOG_PERIOD_MS    5u
 #define SMPTE_WATCHDOG_TIMEOUT_MS   20u
+
+/*
+ * Static Data Items
+ */
 
 static volatile uint32_t gEdgeSeq         = 0;   /* bumped once per capture ISR */
 static uint32_t          gLastSeenEdgeSeq = 0;
 static uint32_t          gStaleMs         = 0;
+
+static bool              gRunning = false;
+static uint32_t          gTimerHz;
+static SMPTE_Decoder     gLtcDecoder;
+static Hwi_Struct        gCaptureHwiStruct;
+static Clock_Struct      gWatchdogClockStruct;
 
 /*
  * WTIMER0A capture interrupt. Runs in Hwi context. The edge time itself
@@ -145,6 +151,7 @@ static uint32_t          gStaleMs         = 0;
  * this ISR does is clear the flag and read the latched value out, so its
  * own scheduling latency doesn't touch the timestamp's accuracy.
  */
+
 static void timerCaptureHwi(UArg arg)
 {
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
@@ -159,20 +166,27 @@ static void timerCaptureHwi(UArg arg)
  * changed -- deliberately independent of the capture timer itself, per
  * the note in the file header.
  */
+
 static void watchdogClockFxn(UArg arg)
 {
     if (!gRunning) {
         return;
     }
 
-    if (gEdgeSeq == gLastSeenEdgeSeq) {
-        if (gStaleMs < SMPTE_WATCHDOG_TIMEOUT_MS) {
+    if (gEdgeSeq == gLastSeenEdgeSeq)
+    {
+        if (gStaleMs < SMPTE_WATCHDOG_TIMEOUT_MS)
+        {
             gStaleMs += SMPTE_WATCHDOG_PERIOD_MS;
-            if (gStaleMs >= SMPTE_WATCHDOG_TIMEOUT_MS) {
+
+            if (gStaleMs >= SMPTE_WATCHDOG_TIMEOUT_MS)
+            {
                 SMPTE_LTC_onTimeout(&gLtcDecoder);   /* fires once per stall event */
             }
         }
-    } else {
+    }
+    else
+    {
         gLastSeenEdgeSeq = gEdgeSeq;
         gStaleMs         = 0;
     }
@@ -183,111 +197,116 @@ static void watchdogClockFxn(UArg arg)
  * Leaves the timer stopped and the capture interrupt masked -- call
  * SMPTE_HW_start() to actually begin decoding.
  */
+
 void SMPTE_HW_init(void)
 {
     SMPTE_LTC_init(&gLtcDecoder);
+
     gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
 
     gTimerHz = SysCtlClockGet();
 
     /* --- route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input --- */
+
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-    //Wait for the CCM peripheral to be ready
-    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC))
-    {
-    }
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC));
 
     GPIOPinConfigure(GPIO_PC4_WT0CCP0);
     GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
 
     /* --- configure WTIMER0, sub-timer A, as 32-bit edge-time capture,
      * up-counting --- */
+
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
-    //Wait for the CCM peripheral to be ready
-    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_WTIMER0))
-    {
-    }
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_WTIMER0));
 
     TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_CAP_TIME_UP);
     TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFFu);
 
     /* capture on both rising and falling edges -- biphase-mark decode
-     * needs the interval between every transition, not just one polarity */
+     * needs the interval between every transition, not just one polarity
+     */
     TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_BOTH_EDGES);
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
     TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
     /* timer left disabled here -- SMPTE_HW_start() enables it */
 
     /* --- construct (but do not yet enable) the capture interrupt --- */
+
     Error_Block eb;
     Error_init(&eb);
     Hwi_Params hwiParams;
     Hwi_Params_init(&hwiParams);
     hwiParams.priority   = 0x40;   /* tune to your system's priority scheme */
     hwiParams.enableInt  = false;  /* stay masked until SMPTE_HW_start() */
+
     Hwi_construct(&gCaptureHwiStruct, INT_WTIMER0A, timerCaptureHwi, &hwiParams, &eb);
+
     if (Error_check(&eb)) {
         System_abort("SMPTE_HW_init: failed to construct WTIMER0A capture Hwi\n");
     }
 
     /* --- construct (but do not yet start) the signal-loss watchdog --- */
+
     Clock_Params clockParams;
     Clock_Params_init(&clockParams);
     clockParams.period    = SMPTE_WATCHDOG_PERIOD_MS;   /* assumes default 1ms Clock tick */
     clockParams.startFlag = false;
-    Clock_construct(&gWatchdogClockStruct, watchdogClockFxn,
-                     SMPTE_WATCHDOG_PERIOD_MS, &clockParams);
+
+    Clock_construct(&gWatchdogClockStruct, watchdogClockFxn, SMPTE_WATCHDOG_PERIOD_MS, &clockParams);
 }
 
 /* Begin (or resume) capturing and decoding. Resets decoder state for a
- * clean resync. Safe to call again while already running (no-op). */
+ * clean resync. Safe to call again while already running (no-op).
+ */
+
 void SMPTE_HW_start(void)
 {
-    if (gRunning) {
-        return;
+    if (!gRunning)
+    {
+        SMPTE_LTC_init(&gLtcDecoder);
+        gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
+
+        gEdgeSeq         = 0;
+        gLastSeenEdgeSeq = 0;
+        gStaleMs         = 0;
+
+        TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+        TimerEnable(WTIMER0_BASE, TIMER_A);
+        Hwi_enableInterrupt(INT_WTIMER0A);
+
+        Clock_start(Clock_handle(&gWatchdogClockStruct));
+
+        gRunning = true;
     }
-
-    SMPTE_LTC_init(&gLtcDecoder);
-    gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
-
-    gEdgeSeq         = 0;
-    gLastSeenEdgeSeq = 0;
-    gStaleMs         = 0;
-
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
-    TimerEnable(WTIMER0_BASE, TIMER_A);
-    Hwi_enableInterrupt(INT_WTIMER0A);
-
-    Clock_start(Clock_handle(&gWatchdogClockStruct));
-
-    gRunning = true;
 }
 
 /* Halt capturing and decoding: timer counter stopped, capture interrupt
  * masked, watchdog stopped. Leaves the last decoded dec->tc value
- * untouched. Safe to call again while already stopped (no-op). */
+ * untouched. Safe to call again while already stopped (no-op).
+ */
+
 void SMPTE_HW_stop(void)
 {
-    if (!gRunning) {
-        return;
+    if (gRunning)
+    {
+        Clock_stop(Clock_handle(&gWatchdogClockStruct));
+
+        Hwi_disableInterrupt(INT_WTIMER0A);
+        TimerDisable(WTIMER0_BASE, TIMER_A);
+
+        /* Status LED */
+        GPIO_write(Board_STAT_LED, Board_LED_ON);
+
+        /* SMPTE input mute on */
+        GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
+        GPIO_write(Board_FRAME_SYNC, PIN_LOW);
+        GPIO_write(Board_DIRECTION, PIN_LOW);
+        GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+        GPIO_write(Board_BUSY_N, PIN_HIGH);
+
+        gRunning = false;
     }
-
-    Clock_stop(Clock_handle(&gWatchdogClockStruct));
-
-    Hwi_disableInterrupt(INT_WTIMER0A);
-    TimerDisable(WTIMER0_BASE, TIMER_A);
-
-    /* Status LED */
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-
-    /* SMPTE input mute on */
-    GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
-    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
-    GPIO_write(Board_DIRECTION, PIN_LOW);
-    GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
-    GPIO_write(Board_BUSY_N, PIN_HIGH);
-
-    gRunning = false;
 }
 
 bool SMPTE_HW_isRunning(void)

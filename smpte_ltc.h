@@ -35,18 +35,23 @@
 extern "C" {
 #endif
 
-#define SMPTE_SYNC_WORD           0x3FFDu   /* forward: bits 64-79, MSB-first (bit64..bit79) */
-#define SMPTE_SYNC_WORD_REVERSE   0xBFFCu   /* same 16 bits, bit-reversed -- what a continuously
-                                              * shifting receiver sees when the signal plays
-                                              * backward. See smpte_ltc.c for the derivation. */
+/*
+ * SMPTE Constants and Data Structures for encoding and decoding packets.
+ */
 
-typedef enum {
+#define SMPTE_SYNC_WORD           0x3FFDu   /* forward: bits 64-79, MSB-first (bit64..bit79) */
+#define SMPTE_SYNC_WORD_REVERSE   0xBFFCu   /* 16 bits, bit-reversed - what a continuously   */
+                                            /* shifting receiver sees when the signal plays  */
+                                            /* backward. See smpte_ltc.c for the derivation. */
+typedef enum
+{
     SMPTE_DIR_UNKNOWN = 0,
     SMPTE_DIR_FORWARD,
     SMPTE_DIR_REVERSE
 } SMPTE_Direction;
 
-typedef struct {
+typedef struct
+{
     uint8_t  hours;
     uint8_t  minutes;
     uint8_t  seconds;
@@ -59,7 +64,9 @@ typedef struct {
 } SMPTE_Timecode;
 
 /* Opaque-ish decoder state -- allocate one instance per LTC input channel. */
-typedef struct {
+
+typedef struct
+{
     /* timing / clock recovery */
     uint32_t lastEdgeTick;
     uint32_t avgHalfBitTicks;   /* adaptive running estimate of a half-bit period, in timer ticks */
@@ -139,6 +146,17 @@ static inline uint32_t SMPTE_LTC_ticksToUs(uint32_t ticks, uint32_t timerHz)
 {
     return (uint32_t)(((uint64_t)ticks * 1000000u) / timerHz);
 }
+
+/*
+ * SMPTE Hardware Function Prototypes
+ */
+void SMPTE_HW_init(void);
+void SMPTE_HW_start(void);
+void SMPTE_HW_stop(void);
+SMPTE_Decoder *SMPTE_HW_getDecoder(void);
+uint32_t SMPTE_HW_getTimerHz(void);
+bool SMPTE_HW_isRunning(void);
+
 
 #ifdef __cplusplus
 }

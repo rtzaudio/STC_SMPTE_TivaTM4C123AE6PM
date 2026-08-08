@@ -107,34 +107,49 @@
  * on the comparator output, not a real LTC transition. Tune to your timer
  * tick rate; at an 80 MHz tick rate this is ~50ns, comfortably below any
  * real half-bit period (LTC half-bit periods are on the order of
- * 200-2000us across the 24-30 fps range). */
+ * 200-2000us across the 24-30 fps range).
+ */
+
 #define SMPTE_MIN_INTERVAL_TICKS   4u
+
+/*
+ * Static Function Prototypes
+ */
 
 static void SMPTE_LTC_parseFrame(SMPTE_Decoder *dec);
 static void SMPTE_LTC_parseFrameReverse(SMPTE_Decoder *dec);
 static void resetLock(SMPTE_Decoder *dec);
 
+/* Initialize the decoder */
+
 void SMPTE_LTC_init(SMPTE_Decoder *dec)
 {
     memset(dec, 0, sizeof(*dec));
-    dec->tickMask = 0xFFFFFFFFu;   /* full 32-bit range; narrow this after
-                                     * init if your tick source is smaller
-                                     * (see smpte_ltc.h) */
+
+    /* full 32-bit range; narrow this after init.
+     * if your tick source is smaller (see smpte_ltc.h)
+     */
+    dec->tickMask = 0xFFFFFFFFu;
 }
 
-/* -- forward-window bit access: frame[] is a continuously-shifting 80-bit
- * window, oldest bit at frame[0] bit7, newest at frame[9] bit0 -- */
+/* Forward-window bit access: frame[] is a continuously-shifting 80-bit
+ * window, oldest bit at frame[0] bit7, newest at frame[9] bit0
+ */
+
 static inline uint8_t frameGetBit(const uint8_t *frame, uint8_t smpteBitIndex)
 {
     uint8_t posFromLsb = (uint8_t)(79u - smpteBitIndex);
-    uint8_t byteIdx     = (uint8_t)(9u - (posFromLsb >> 3));
-    uint8_t bitInByte   = (uint8_t)(posFromLsb & 0x7u);
+    uint8_t byteIdx    = (uint8_t)(9u - (posFromLsb >> 3));
+    uint8_t bitInByte  = (uint8_t)(posFromLsb & 0x7u);
+
     return (uint8_t)((frame[byteIdx] >> bitInByte) & 0x1u);
 }
 
 /* -- reverse-buffer bit access: revData[] is a plain 64-bit buffer already
  * indexed by true SMPTE bit index (0 = MSB of revData[0]), since bits are
- * written to their real index as they arrive -- */
+ * written to their real index as they arrive --
+ */
+
 static inline void bufSetBit(uint8_t *buf, uint8_t bitIndex, uint8_t val)
 {
     uint8_t byteIdx   = (uint8_t)(bitIndex >> 3);
@@ -154,7 +169,9 @@ static inline uint8_t bufGetBit(const uint8_t *buf, uint8_t bitIndex)
 }
 
 /* SMPTE fields are transmitted LSB-first, so bit `startBit` is the LSB of
- * the field. Same convention for both accessors above. */
+ * the field. Same convention for both accessors above.
+ */
+
 typedef uint8_t (*BitGetter)(const uint8_t *, uint8_t);
 
 static uint32_t getField(BitGetter get, const uint8_t *buf, uint8_t startBit, uint8_t numBits)
@@ -173,7 +190,9 @@ static uint32_t getField(BitGetter get, const uint8_t *buf, uint8_t startBit, ui
  * only the interpretation of bit 10 (drop frame flag, meaningless at 25
  * fps) and the BGF flag bits differs between variants -- that
  * interpretation is application knowledge, not something decodable
- * purely from the bitstream. */
+ * purely from the bitstream.
+ */
+
 enum {
     BIT_FRAME_UNITS = 0,   /* 4 bits */
     BIT_USER1       = 4,   /* 4 bits */
@@ -241,7 +260,9 @@ static void SMPTE_LTC_parseFrameReverse(SMPTE_Decoder *dec)
  * signal locks cleanly rather than risking a spurious match against
  * stale leftover bits. Deliberately does NOT touch dec->tc / frameReady /
  * frameCount -- the last decoded timecode stays available to the
- * consumer alongside the error flags. */
+ * consumer alongside the error flags.
+ */
+
 static void resetLock(SMPTE_Decoder *dec)
 {
     dec->haveLastEdge    = false;
@@ -264,7 +285,8 @@ void SMPTE_LTC_onTimeout(SMPTE_Decoder *dec)
 
 bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
 {
-    if (!dec->haveLastEdge) {
+    if (!dec->haveLastEdge)
+    {
         dec->lastEdgeTick = nowTicks;
         dec->haveLastEdge = true;
         return false;
@@ -273,18 +295,25 @@ bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
     /* unsigned sub, masked to the tick counter's actual width, so a
      * hardware counter narrower than 32 bits (e.g. a 24-bit CCP capture
      * register) still wraps correctly instead of producing one huge
-     * bogus interval every rollover */
+     * bogus interval every rollover
+     */
+
     uint32_t delta = (nowTicks - dec->lastEdgeTick) & dec->tickMask;
+
     dec->lastEdgeTick = nowTicks;
 
-    if (delta < SMPTE_MIN_INTERVAL_TICKS) {
+    if (delta < SMPTE_MIN_INTERVAL_TICKS)
+    {
         return false;   /* glitch, don't disturb clock recovery */
     }
 
-    if (dec->avgHalfBitTicks == 0) {
+    if (dec->avgHalfBitTicks == 0)
+    {
         /* bootstrap: seed the running average with the first plausible
          * interval; it will settle within a handful of edges. */
+
         dec->avgHalfBitTicks = delta;
+
         return false;
     }
 
@@ -292,42 +321,62 @@ bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
     uint32_t longMax  = dec->avgHalfBitTicks * 3u;                          /* generous outer bound */
 
     bool isShort;
-    if (delta <= shortMax) {
+
+    if (delta <= shortMax)
+    {
         isShort = true;
-    } else if (delta <= longMax) {
+    }
+    else if (delta <= longMax)
+    {
         isShort = false;
-    } else {
+    }
+    else
+    {
         /* way outside expectation: dropout, cable unplugged, huge speed
          * change (fast-wind). Drop clock-recovery lock and start over. */
+
         resetLock(dec);
+
         dec->badSyncCount++;
+
         return false;
     }
 
     dec->signalPresent = true;
-    dec->timedOut       = false;   /* real edges are arriving again */
+    dec->timedOut      = false;   /* real edges are arriving again */
 
     bool    bitReady = false;
     uint8_t bitVal   = 0;
 
-    if (!isShort) {
+    if (!isShort)
+    {
         /* one long interval = a full bit cell with no mid-cell transition -> "0" */
+
         dec->halfBitPending = false;  /* a stray pending half is discarded */
         bitVal   = 0;
         bitReady = true;
+
         /* long intervals are a solid timing reference; nudge the average
-         * gently using half the long interval */
+         * gently using half the long interval
+         */
         dec->avgHalfBitTicks = (uint32_t)((int32_t)dec->avgHalfBitTicks +
                                 (((int32_t)(delta >> 1) - (int32_t)dec->avgHalfBitTicks) / 8));
-    } else {
+    }
+    else
+    {
         /* short interval = half a bit cell */
-        if (!dec->halfBitPending) {
+
+        if (!dec->halfBitPending)
+        {
             dec->halfBitPending = true;    /* first half seen, wait for the second */
-        } else {
+        }
+        else
+        {
             dec->halfBitPending = false;
             bitVal   = 1;
             bitReady = true;
         }
+
         dec->avgHalfBitTicks = (uint32_t)((int32_t)dec->avgHalfBitTicks +
                                 (((int32_t)delta - (int32_t)dec->avgHalfBitTicks) / 8));
     }
@@ -338,32 +387,46 @@ bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
 
     dec->bitsSinceSync++;
 
-    /* -- feed the forward continuously-shifting window (used for forward
-     * sync detection and forward field extraction) -- */
+    /* feed the forward continuously-shifting window (used for forward
+     * sync detection and forward field extraction)
+     */
+
     int i;
-    for (i = 0; i < 9; i++) {
+
+    for (i = 0; i < 9; i++)
+    {
         dec->frame[i] = (uint8_t)((dec->frame[i] << 1) | (dec->frame[i + 1] >> 7));
     }
+
     dec->frame[9] = (uint8_t)((dec->frame[9] << 1) | bitVal);
 
-    /* -- also feed the reverse-direction data collector, in case a
+    /* also feed the reverse-direction data collector, in case a
      * reverse frame is currently mid-collection. Harmless no-op once 64
-     * bits are already collected and awaiting confirmation. -- */
-    if (dec->revBitCount < 64u) {
+     * bits are already collected and awaiting confirmation.
+     */
+
+    if (dec->revBitCount < 64u)
+    {
         uint8_t idx = (uint8_t)(63u - dec->revBitCount);
         bufSetBit(dec->revData, idx, bitVal);
         dec->revBitCount++;
     }
 
     uint16_t tail = (uint16_t)(((uint16_t)dec->frame[8] << 8) | dec->frame[9]);
+
     bool gotFrame = false;
 
-    if (tail == SMPTE_SYNC_WORD) {
+    if (tail == SMPTE_SYNC_WORD)
+    {
         /* a genuine frame is always exactly 80 bits; flag (but still
-         * resync to) anything else as a framing anomaly */
-        if (dec->direction == SMPTE_DIR_FORWARD && dec->bitsSinceSync != 80u) {
+         * resync to) anything else as a framing anomaly
+         */
+
+        if (dec->direction == SMPTE_DIR_FORWARD && dec->bitsSinceSync != 80u)
+        {
             dec->badSyncCount++;
         }
+
         SMPTE_LTC_parseFrame(dec);
         dec->direction     = SMPTE_DIR_FORWARD;
         dec->bitsSinceSync = 0;
@@ -371,15 +434,21 @@ bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
         dec->tc.frameCount++;
         dec->frameReady = true;
         gotFrame = true;
-    } else if (tail == SMPTE_SYNC_WORD_REVERSE) {
-        if (dec->direction == SMPTE_DIR_REVERSE && dec->revBitCount == 64u) {
+    }
+    else if (tail == SMPTE_SYNC_WORD_REVERSE)
+    {
+        if (dec->direction == SMPTE_DIR_REVERSE && dec->revBitCount == 64u)
+        {
             SMPTE_LTC_parseFrameReverse(dec);
             dec->tc.frameCount++;
             dec->frameReady = true;
             gotFrame = true;
-        } else if (dec->direction == SMPTE_DIR_REVERSE) {
+        }
+        else if (dec->direction == SMPTE_DIR_REVERSE)
+        {
             dec->badSyncCount++;   /* wrong bit count collected between reverse syncs */
         }
+
         dec->direction     = SMPTE_DIR_REVERSE;
         dec->revBitCount   = 0;    /* this sync starts the *next* frame's collection */
         dec->bitsSinceSync = 0;

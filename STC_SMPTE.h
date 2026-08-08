@@ -50,6 +50,7 @@
  */
 
 #include "libltc\ltc.h"
+#include "smpte_ltc.h"
 
 #define FIRMWARE_VER        2           /* firmware version */
 #define FIRMWARE_REV        33        	/* firmware revision */
@@ -85,10 +86,6 @@
 #define ZERO_TIME_MIN       ((EXPECTED_DURATION_DOUBLE - MAX_DELTA) * 80)
 #endif
 
-#define FPS24_REF           521
-#define FPS25_REF           500
-#define FPS30_REF           417
-
 /*** LTCFrame Queue Elements ***********************************************/
 
 typedef struct _LTCFrameElement {
@@ -99,15 +96,10 @@ typedef struct _LTCFrameElement {
 typedef struct _LTCFrameQueue {
     /* queues and semaphores */
     Queue_Handle        free_queue;
-    Semaphore_Handle    free_semaphore;
     Queue_Handle        data_queue;
+    Semaphore_Handle    free_semaphore;
     Semaphore_Handle    data_semaphore;
-    /* server data items */
-    int                 num_free_messages;
-    int                 error_count;
-    uint32_t            count;
-    /* frame memory buffers */
-    LTCFrameElement*    buf;
+    LTCFrameElement*    buf;                /* frame elements buffer */
 } LTCFrameQueue;
 
 /*** System Structures *****************************************************/

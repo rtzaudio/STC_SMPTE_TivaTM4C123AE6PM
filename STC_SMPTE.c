@@ -117,7 +117,7 @@ extern bool g_encoderEnabled;
 extern bool g_decoderEnabled;
 extern bool g_bPostInterrupts;
 
-bool SPI_transfer_sync(SPI_Handle handle, SPI_Transaction *transaction);
+static bool SPI_transfer_sync(SPI_Handle handle, SPI_Transaction *transaction);
 
 //*****************************************************************************
 // Main Program Entry Point
@@ -158,6 +158,7 @@ Int main()
     Task_Params_init(&taskParams);
     taskParams.stackSize = 1500;
     taskParams.priority  = 10;
+
     if (Task_create(SPI_SlaveTask, &taskParams, &eb) == NULL)
         System_abort("SPI_SlaveTask!\n");
 
@@ -763,63 +764,5 @@ int32_t SysParamsRead(SYSCFG* sp)
 
     return 0;
 }
-
-
-#if 0
-
-#include "smpte_ltc.h"
-
-extern SMPTE_Decoder *SMPTE_HW_getDecoder(void);
-
-static void ltcConsumerTaskFxn(UArg a0, UArg a1)
-{
-    SMPTE_Decoder *dec = SMPTE_HW_getDecoder();
-    SMPTE_Timecode local;
-    bool     wasSignalPresent = true;
-    bool     wasTimedOut      = false;
-    uint32_t lastBadSyncCount = 0;
-
-    for (;;) {
-        if (dec->frameReady) {
-            UInt key = Hwi_disable();
-            local = dec->tc;
-            dec->frameReady = false;
-            Hwi_restore(key);
-
-            System_printf("%02u:%02u:%02u:%02u%s [%s]\n",
-                          local.hours, local.minutes,
-                          local.seconds, local.frames,
-                          local.dropFrame ? " DF" : "",
-                          local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
-        }
-
-        if (dec->signalPresent != wasSignalPresent) {
-            wasSignalPresent = dec->signalPresent;
-            if (!wasSignalPresent) {
-                System_printf("LTC: edges present but failing to classify\n");
-            }
-        }
-
-        if (dec->timedOut != wasTimedOut) {
-            wasTimedOut = dec->timedOut;
-            if (wasTimedOut) {
-                System_printf("LTC: signal lost -- no edges (timeout #%u)\n",
-                              dec->timeoutCount);
-            } else {
-                System_printf("LTC: signal recovered\n");
-            }
-        }
-
-        if (dec->badSyncCount != lastBadSyncCount) {
-            lastBadSyncCount = dec->badSyncCount;
-            System_printf("LTC: framing anomaly (total: %u)\n", dec->badSyncCount);
-        }
-
-        /* Frames arrive every ~33-42ms depending on fps; 5ms poll gives
-         * comfortable margin without burning cycles. */
-        Task_sleep(5);
-    }
-}
-#endif
 
 /* End-Of-File */
