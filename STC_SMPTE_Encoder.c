@@ -87,7 +87,7 @@
 #include "STC_SMPTE_SPI.h"
 
 /* Returns the state of a bit number in the frame buffer */
-#define FRAME_GETBIT(framebuf, bitnum)    ( (((framebuf[bitnum / 8]) >> (bitnum % 8)) & 0x01) )
+#define FRAME_GETBIT(framebuf, bitnum)    ( (((framebuf[bitnum >> 3]) >> (bitnum % 8)) & 0x01) )
 
 /* SMPTE Encoder variables */
 volatile bool     g_encoderEnabled = false;
