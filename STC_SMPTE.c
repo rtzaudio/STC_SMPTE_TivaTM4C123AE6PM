@@ -141,6 +141,7 @@ Int main()
 
     GPIO_write(Board_STAT_LED, Board_LED_ON);
     GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+    GPIO_write(Board_SMPTE_OUT, PIN_HIGH);
     GPIO_write(Board_BUSY_N, PIN_HIGH);
 
     /* WTIMER1 - SMPTE output generator

@@ -154,6 +154,8 @@ static volatile Bool gRunning = FALSE;   /* TRUE while the timer/ISR is active *
 static void LTC_buildFrame(SMPTE_Time *t, uint8_t frameBits[LTC_BITS_PER_FRAME]);
 static void LTC_advanceTimecode(volatile SMPTE_Time *t);
 static void LTC_timerHwi(UArg arg);
+
+Bool LTC_init(void);
 void LTC_start(void);
 void LTC_stop(void);
 Bool LTC_isRunning(void);
@@ -322,13 +324,16 @@ Bool LTC_init(void)
 
     /* Build the very first frame (00:00:00:00) before the timer starts */
     LTC_buildFrame((SMPTE_Time *)&gTimecode, gFrameBits);
+
     gBitIndex   = 0;
     gHalfBitPos = 0;
     gLineLevel  = 0;
 
     /* USER start mode: the timer is created in the stopped state so the
-     * generator does not begin transmitting until LTC_start() is called. */
+     * generator does not begin transmitting until LTC_start() is called.
+     */
     Timer_Params_init(&timerParams);
+
     timerParams.periodType = Timer_PeriodType_MICROSECS;
     timerParams.period     = 1000000UL / LTC_HALFBIT_RATE_HZ; /* us per half-bit */
     timerParams.startMode  = Timer_StartMode_USER;
@@ -336,20 +341,21 @@ Bool LTC_init(void)
 
     /* Timer_ANY lets SYS/BIOS pick a free hardware timer instance; pin a
      * specific instance number instead of Timer_ANY if you need a
-     * particular peripheral (e.g. for a shared clock domain). */
+     * particular peripheral (e.g. for a shared clock domain).
+     */
     gTimerHandle = Timer_create(Timer_ANY, LTC_timerHwi, &timerParams, &eb);
 
     if (gTimerHandle == NULL) {
         System_printf("LTC_init: Timer_create failed\n");
-        return FALSE;
+        return false;
     }
 
     gRunning = FALSE;
 
-    System_printf("LTC_init: LTC generator ready (%d fps%s), "
-                  "half-bit rate %d Hz (period %d us).\n",
-                  LTC_FPS, LTC_DROP_FRAME ? " drop-frame" : "",
-                  LTC_HALFBIT_RATE_HZ, timerParams.period);
+    //System_printf("LTC_init: LTC generator ready (%d fps%s), "
+    //              "half-bit rate %d Hz (period %d us).\n",
+    //              LTC_FPS, LTC_DROP_FRAME ? " drop-frame" : "",
+    //              LTC_HALFBIT_RATE_HZ, timerParams.period);
 
     return TRUE;
 }

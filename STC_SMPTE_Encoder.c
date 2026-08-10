@@ -107,12 +107,22 @@ extern uint32_t g_systemClock;
 /* Interrupt Handlers */
 static Void WTimer1AIntHandler(UArg arg);
 
+/* DEBUGGING */
+extern Bool LTC_init(void);
+extern void LTC_start(void);
+extern void LTC_stop(void);
+extern Bool LTC_isRunning(void);
+
 //*****************************************************************************
 //********************** SMPTE ENCODER SUPPORT ********************************
 //*****************************************************************************
 
 void SMPTE_initEncoder(void)
 {
+
+    LTC_init();
+
+#if 0
     /* Map the timer interrupt handlers. We don't make sys/bios calls
      * from these interrupt handlers and there is no need to create a
      * context handler with stack swapping for these. These handlers
@@ -122,6 +132,7 @@ void SMPTE_initEncoder(void)
     Hwi_plug(INT_WTIMER1A, WTimer1AIntHandler);
 
     SMPTE_Encoder_Reset();
+#endif
 }
 
 void SMPTE_Encoder_Reset(void)
@@ -151,6 +162,9 @@ void SMPTE_Encoder_Reset(void)
 
 int SMPTE_Encoder_Start(void)
 {
+    LTC_start();
+
+#if 0
     uint32_t clockrate;
 
     if (g_encoderEnabled)
@@ -211,7 +225,7 @@ int SMPTE_Encoder_Start(void)
     IntEnable(INT_WTIMER1A);
     /* Enable TIMER1A */
     TimerEnable(WTIMER1_BASE, TIMER_A);
-
+#endif
     return 0;
 }
 
@@ -221,6 +235,9 @@ int SMPTE_Encoder_Start(void)
 
 int SMPTE_Encoder_Stop(void)
 {
+    LTC_stop();
+
+#if 0
     if (!g_encoderEnabled)
         return 0;
 
@@ -240,6 +257,7 @@ int SMPTE_Encoder_Stop(void)
     GPIO_write(Board_STAT_LED, Board_LED_ON);
 
     g_encoderEnabled = false;
+#endif
 
     return 1;
 }

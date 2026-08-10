@@ -88,7 +88,6 @@ typedef enum STC_SMPTE_GPIOName {
     STC_SMPTE_GPIOCOUNT
 } STC_SMPTE_GPIOName;
 
-#if 0
 /*!
  *  @def    STC_SMPTE_I2CName
  *  @brief  Enum of I2C names on the STC_SMPTE dev board
@@ -103,6 +102,7 @@ typedef enum STC_SMPTE_I2CName {
  *  @def    STC_SMPTE_PWMName
  *  @brief  Enum of PWM names on the STC_SMPTE dev board
  */
+#if 0
 typedef enum STC_SMPTE_PWMName {
     STC_SMPTE_PWM0 = 0,
 
