@@ -317,8 +317,6 @@ Bool LTC_init(void)
     Timer_Params timerParams;
     Error_Block  eb;
 
-    Error_init(&eb);
-
     /* Board_initGPIO() must already have been called in main() before this */
     GPIO_write(LTC_GPIO_OUT, 0);
 
@@ -343,7 +341,10 @@ Bool LTC_init(void)
      * specific instance number instead of Timer_ANY if you need a
      * particular peripheral (e.g. for a shared clock domain).
      */
-    gTimerHandle = Timer_create(Timer_ANY, LTC_timerHwi, &timerParams, &eb);
+
+    Error_init(&eb);
+
+    gTimerHandle = Timer_create(4/*Timer_ANY*/, LTC_timerHwi, &timerParams, &eb);
 
     if (gTimerHandle == NULL) {
         System_printf("LTC_init: Timer_create failed\n");

@@ -157,7 +157,7 @@ Int main()
     Error_init(&eb);
 
     Task_Params_init(&taskParams);
-    taskParams.stackSize = 1500;
+    taskParams.stackSize = 2948;
     taskParams.priority  = 10;
 
     if (Task_create(SPI_SlaveTask, &taskParams, &eb) == NULL)
