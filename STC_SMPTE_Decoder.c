@@ -212,8 +212,10 @@ void SMPTE_initDecoder(void)
     Task_Params taskParams;
     Task_Params_init(&taskParams);
     Error_init(&eb);
+
     taskParams.stackSize = 2048;
     taskParams.priority  = 10;
+
     Task_create((Task_FuncPtr)DecodeTaskFxn, &taskParams, &eb);
 }
 
@@ -356,11 +358,73 @@ static void watchdogClockFxn(UArg arg)
 
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
+    bool wasSignalPresent = true;
+    bool wasTimedOut = false;
     uint32_t key;
+    uint32_t lastBadSyncCount = 0;
+    SMPTE_Timecode local;
+    SMPTE_Decoder *dec = SMPTE_HW_getDecoder();
 
     /* Initialize and start edge decode interrupts */
     SMPTE_Decoder_Start();
 
+    for (;;)
+    {
+        if (dec->frameReady)
+        {
+            key = Hwi_disable();
+            local = dec->tc;
+            dec->frameReady = false;
+            Hwi_restore(key);
+
+            /* Toggle the LED on each packet received */
+            GPIO_toggle(Board_STAT_LED);
+
+            System_printf("%02u:%02u:%02u:%02u%s [%s]\n",
+                          local.hours, local.minutes,
+                          local.seconds, local.frames,
+                          local.dropFrame ? " DF" : "",
+                          local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
+        }
+
+        if (dec->signalPresent != wasSignalPresent)
+        {
+            wasSignalPresent = dec->signalPresent;
+
+            if (!wasSignalPresent) {
+                System_printf("LTC: edges present but failing to classify\n");
+            }
+        }
+
+        if (dec->timedOut != wasTimedOut)
+        {
+            wasTimedOut = dec->timedOut;
+
+            if (wasTimedOut)
+            {
+                System_printf("LTC: signal lost -- no edges (timeout #%u)\n", dec->timeoutCount);
+            }
+            else
+            {
+                System_printf("LTC: signal recovered\n");
+            }
+        }
+
+        if (dec->badSyncCount != lastBadSyncCount)
+        {
+            lastBadSyncCount = dec->badSyncCount;
+            System_printf("LTC: framing anomaly (total: %u)\n", dec->badSyncCount);
+        }
+
+        /* Frames arrive every ~33-42ms depending on fps; 5ms poll gives
+         * comfortable margin without burning cycles.
+         */
+        Task_sleep(5);
+    }
+}
+
+
+#if 0
     /*
      * Loop waiting for SMPTE word packets to arrive
      */
@@ -393,60 +457,6 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
             //GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
         }
     }
-}
-
-
-#if 0
-
-static void ltcConsumerTaskFxn(UArg a0, UArg a1)
-{
-    SMPTE_Decoder *dec = SMPTE_HW_getDecoder();
-    SMPTE_Timecode local;
-    bool     wasSignalPresent = true;
-    bool     wasTimedOut      = false;
-    uint32_t lastBadSyncCount = 0;
-
-    for (;;) {
-        if (dec->frameReady) {
-            UInt key = Hwi_disable();
-            local = dec->tc;
-            dec->frameReady = false;
-            Hwi_restore(key);
-
-            System_printf("%02u:%02u:%02u:%02u%s [%s]\n",
-                          local.hours, local.minutes,
-                          local.seconds, local.frames,
-                          local.dropFrame ? " DF" : "",
-                          local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
-        }
-
-        if (dec->signalPresent != wasSignalPresent) {
-            wasSignalPresent = dec->signalPresent;
-            if (!wasSignalPresent) {
-                System_printf("LTC: edges present but failing to classify\n");
-            }
-        }
-
-        if (dec->timedOut != wasTimedOut) {
-            wasTimedOut = dec->timedOut;
-            if (wasTimedOut) {
-                System_printf("LTC: signal lost -- no edges (timeout #%u)\n",
-                              dec->timeoutCount);
-            } else {
-                System_printf("LTC: signal recovered\n");
-            }
-        }
-
-        if (dec->badSyncCount != lastBadSyncCount) {
-            lastBadSyncCount = dec->badSyncCount;
-            System_printf("LTC: framing anomaly (total: %u)\n", dec->badSyncCount);
-        }
-
-        /* Frames arrive every ~33-42ms depending on fps; 5ms poll gives
-         * comfortable margin without burning cycles. */
-        Task_sleep(5);
-    }
-}
 #endif
 
 /* Initialize the decoder */
