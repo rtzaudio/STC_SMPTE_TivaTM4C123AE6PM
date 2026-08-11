@@ -181,10 +181,8 @@ bool SPI_transfer_sync(SPI_Handle handle, SPI_Transaction *transaction)
 
     /* Set BUSY pin low to indicate we're busy */
     GPIO_write(Board_BUSY_N, PIN_LOW);
-
     /* Send the SPI transaction */
     success = SPI_transfer(handle, transaction);
-
     /* Set BUSY back high to indicate not busy status */
     GPIO_write(Board_BUSY_N, PIN_HIGH);
 

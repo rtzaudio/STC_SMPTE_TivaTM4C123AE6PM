@@ -49,7 +49,7 @@
  * to be reset or not.
  */
 
-#include "libltc\ltc.h"
+#include "libltc/ltc.h"
 #include "smpte_ltc.h"
 
 #define FIRMWARE_VER        2           /* firmware version */
