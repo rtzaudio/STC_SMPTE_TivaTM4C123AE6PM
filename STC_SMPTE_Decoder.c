@@ -152,22 +152,45 @@ extern uint32_t g_systemClock;
 
 void SMPTE_initDecoder(void)
 {
+    gTimerHz = SysCtlClockGet();
+
     SMPTE_LTC_init(&gLtcDecoder);
 
     gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
 
-    gTimerHz = SysCtlClockGet();
+    /* --- construct the capture interrupt handler --- */
+
+    Error_Block eb;
+    Error_init(&eb);
+    Hwi_Params hwiParams;
+    Hwi_Params_init(&hwiParams);
+    hwiParams.priority   = 0x40;   /* tune to your system's priority scheme */
+    hwiParams.enableInt  = false;  /* stay masked until SMPTE_HW_start() */
+    Hwi_construct(&gCaptureHwiStruct, INT_WTIMER0A, timerCaptureHwi, &hwiParams, &eb);
+    if (Error_check(&eb)) {
+        System_abort("SMPTE_HW_init: failed to construct WTIMER0A capture Hwi\n");
+    }
 
     /* --- route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input --- */
+
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC));
-    GPIOPinConfigure(GPIO_PC4_WT0CCP0);
-    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_WTIMER0));
 
     /* --- configure WTIMER0, sub-timer A, as 32-bit edge-time capture,
      * up-counting --- */
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
-    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_WTIMER0));
+
+    /* First make sure the timer is disabled */
+    TimerDisable(WTIMER0_BASE, TIMER_A);
+    TimerDisable(WTIMER0_BASE, TIMER_B);
+
+    /* Disable global interrupts */
+    IntMasterDisable();
+
+    GPIOPinConfigure(GPIO_PC4_WT0CCP0);
+    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
+
     TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_CAP_TIME_UP);
     TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFFu);
 
@@ -179,17 +202,8 @@ void SMPTE_initDecoder(void)
     TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
     /* timer left disabled here -- SMPTE_HW_start() enables it */
 
-    /* --- construct (but do not yet enable) the capture interrupt --- */
-    Error_Block eb;
-    Error_init(&eb);
-    Hwi_Params hwiParams;
-    Hwi_Params_init(&hwiParams);
-    //hwiParams.priority   = 0x40;   /* tune to your system's priority scheme */
-    hwiParams.enableInt  = false;  /* stay masked until SMPTE_HW_start() */
-    Hwi_construct(&gCaptureHwiStruct, INT_WTIMER0A, timerCaptureHwi, &hwiParams, &eb);
-    if (Error_check(&eb)) {
-        System_abort("SMPTE_HW_init: failed to construct WTIMER0A capture Hwi\n");
-    }
+    /* Renable master interrtupts */
+    IntMasterEnable();
 
     /* --- construct (but do not yet start) the signal-loss watchdog --- */
 
@@ -235,6 +249,9 @@ int SMPTE_Decoder_Start(void)
 
         TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
         TimerEnable(WTIMER0_BASE, TIMER_A);
+
+        /* Enable timer A & B interrupts ???? */
+        IntEnable(INT_WTIMER0A);
 
         Hwi_enableInterrupt(INT_WTIMER0A);
 
