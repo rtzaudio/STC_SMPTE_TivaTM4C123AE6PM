@@ -159,19 +159,15 @@ void SMPTE_initDecoder(void)
     gTimerHz = SysCtlClockGet();
 
     /* --- route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input --- */
-
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC));
-
     GPIOPinConfigure(GPIO_PC4_WT0CCP0);
     GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
 
     /* --- configure WTIMER0, sub-timer A, as 32-bit edge-time capture,
      * up-counting --- */
-
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_WTIMER0));
-
     TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_CAP_TIME_UP);
     TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFFu);
 
@@ -184,16 +180,13 @@ void SMPTE_initDecoder(void)
     /* timer left disabled here -- SMPTE_HW_start() enables it */
 
     /* --- construct (but do not yet enable) the capture interrupt --- */
-
     Error_Block eb;
     Error_init(&eb);
     Hwi_Params hwiParams;
     Hwi_Params_init(&hwiParams);
-    hwiParams.priority   = 0x40;   /* tune to your system's priority scheme */
+    //hwiParams.priority   = 0x40;   /* tune to your system's priority scheme */
     hwiParams.enableInt  = false;  /* stay masked until SMPTE_HW_start() */
-
     Hwi_construct(&gCaptureHwiStruct, INT_WTIMER0A, timerCaptureHwi, &hwiParams, &eb);
-
     if (Error_check(&eb)) {
         System_abort("SMPTE_HW_init: failed to construct WTIMER0A capture Hwi\n");
     }
@@ -204,18 +197,14 @@ void SMPTE_initDecoder(void)
     Clock_Params_init(&clockParams);
     clockParams.period    = SMPTE_WATCHDOG_PERIOD_MS;   /* assumes default 1ms Clock tick */
     clockParams.startFlag = false;
-
     Clock_construct(&gWatchdogClockStruct, watchdogClockFxn, SMPTE_WATCHDOG_PERIOD_MS, &clockParams);
-
 
     /* Create the SMPTE packet decoder task */
     Task_Params taskParams;
     Task_Params_init(&taskParams);
     Error_init(&eb);
-
     taskParams.stackSize = 2048;
     taskParams.priority  = 10;
-
     Task_create((Task_FuncPtr)DecodeTaskFxn, &taskParams, &eb);
 }
 
