@@ -115,7 +115,8 @@ typedef struct _SYSCFG
 	uint32_t build;
     /*** GLOBAL PARAMETERS ***/
 	uint32_t debug;
-    uint32_t sysflags;
+    uint32_t sysflags;    LTCFrameElement*    buf;                /* frame elements buffer */
+
     char timezone[6];
     int32_t frame_rate;
     bool drop_frame;
