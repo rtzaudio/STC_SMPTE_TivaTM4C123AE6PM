@@ -235,6 +235,7 @@ int SMPTE_Decoder_Start(void)
     if (!gRunning)
     {
         SMPTE_LTC_init(&gLtcDecoder);
+
         gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
 
         gEdgeSeq         = 0;
@@ -243,6 +244,7 @@ int SMPTE_Decoder_Start(void)
 
         TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
         TimerEnable(WTIMER0_BASE, TIMER_A);
+
         Hwi_enableInterrupt(INT_WTIMER0A);
 
         Clock_start(Clock_handle(&gWatchdogClockStruct));
@@ -368,7 +370,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         /* Wait for an 80-bit timecode word */
         //if (!Mailbox_pend(mailboxWord, &word, 100))
         {
-            GPIO_write(Board_STAT_LED, Board_LED_ON);
+            //GPIO_write(Board_STAT_LED, Board_LED_ON);
             //continue;
         }
 
@@ -383,10 +385,12 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         //g_timecode.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
         GateMutex_leave(gateMutex0, key);
 
+        Task_sleep(1000);
+
         /* Assert the interrupt line to notify host packet is ready  */
         if (g_bPostInterrupts)
         {
-            GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
+            //GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
         }
     }
 }

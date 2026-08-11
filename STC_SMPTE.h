@@ -83,15 +83,13 @@ extern "C" {
 #define SMPTE_SYNC_WORD_REVERSE   0xBFFCu   /* 16 bits, bit-reversed - what a continuously   */
                                             /* shifting receiver sees when the signal plays  */
                                             /* backward. See smpte_ltc.c for the derivation. */
-typedef enum
-{
+typedef enum {
     SMPTE_DIR_UNKNOWN = 0,
     SMPTE_DIR_FORWARD,
     SMPTE_DIR_REVERSE
 } SMPTE_Direction;
 
-typedef struct
-{
+typedef struct {
     uint8_t  hours;
     uint8_t  minutes;
     uint8_t  seconds;
@@ -105,8 +103,7 @@ typedef struct
 
 /* Opaque-ish decoder state -- allocate one instance per LTC input channel. */
 
-typedef struct
-{
+typedef struct {
     /* timing / clock recovery */
     uint32_t lastEdgeTick;
     uint32_t avgHalfBitTicks;   /* adaptive running estimate of a half-bit period, in timer ticks */
@@ -134,15 +131,14 @@ typedef struct
      * arrive, so revData is always in normal MSB-first field order once
      * revBitCount reaches 64. */
     uint8_t  revData[8];
-    uint8_t  revBitCount;       /* bits collected into revData since the last reverse sync, 0-64 */
+    uint8_t  revBitCount;           /* bits collected into revData since the last reverse sync, 0-64 */
 
-    SMPTE_Direction direction;  /* last confirmed playback direction */
-    uint32_t bitsSinceSync;     /* bits accepted since the last confirmed forward sync, for a
-                                  * frame-length sanity check (a genuine frame is always 80 bits) */
-
+    SMPTE_Direction direction;      /* last confirmed playback direction */
+    uint32_t bitsSinceSync;         /* bits accepted since the last confirmed forward sync, for a
+                                     * frame-length sanity check (a genuine frame is always 80 bits) */
     /* decoded output */
     SMPTE_Timecode tc;
-    volatile bool  frameReady;   /* set in ISR context when a new frame has been parsed */
+    volatile bool  frameReady;      /* set in ISR context when a new frame has been parsed */
 
     /* health / diagnostics */
     volatile bool  signalPresent;   /* edges are arriving and classifying cleanly */
@@ -209,8 +205,7 @@ typedef struct _LTCFrameQueue {
  * stored and read from EEPROM. The structure size must be 4 byte aligned.
  */
 
-typedef struct _SYSCFG
-{
+typedef struct _SYSCFG {
 	uint32_t magic;
 	uint32_t version;
 	uint32_t build;
