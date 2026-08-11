@@ -86,62 +86,65 @@
 /* XDCtools Header files */
 #include "Board.h"
 #include "STC_SMPTE.h"
-#include "STC_SMPTE_SPI.h"
 
-/*** Data Types and Constants ***/
+/* Ignore intervals shorter than this -- electrical glitch / contact bounce
+ * on the comparator output, not a real LTC transition. Tune to your timer
+ * tick rate; at an 80 MHz tick rate this is ~50ns, comfortably below any
+ * real half-bit period (LTC half-bit periods are on the order of
+ * 200-2000us across the 24-30 fps range).
+ */
 
-#define DEBUG_SMPTE     0
+#define SMPTE_MIN_INTERVAL_TICKS    4u
 
-/* SMPTE 80-bit frame buffer */
-typedef struct _LTCFrameBits {
-    uint64_t        data;       /* 64-bits data */
-    uint16_t        sync;       /* 16-bits sync */
-} LTCFrameBits;                 /* 80-bit frame */
+/* Wide Timer 0 sub-timer A is natively 32-bit in capture mode -- no
+ * prescale extension needed, unlike the standard-timer version.
+ */
 
-/* Access as struct members or raw bit form */
-typedef union _LTCFrameWord {
-    LTCFrame        ltc;        /* members form */
-    LTCFrameBits    raw;        /* raw bit form */
-} LTCFrameWord;
+#define SMPTE_CAPTURE_TICK_MASK     0xFFFFFFFFu
 
-/*** SMPTE Decoder variables ***/
+/* Watchdog tuning: declare signal loss after this many ms with zero
+ * edges. Comfortably above any real LTC half-bit period (~200-2000us)
+ * with margin for slow-motion scrubbing; tighten it if your application
+ * needs a faster "signal lost" reaction.
+ */
 
-bool g_decoderEnabled = false;
-bool g_bPostInterrupts = false;
+#define SMPTE_WATCHDOG_PERIOD_MS    5u
+#define SMPTE_WATCHDOG_TIMEOUT_MS   20u
 
-volatile uint32_t g_uiPeriod = 0;
-volatile uint32_t g_uiHighCount = 0;
-volatile uint32_t g_uiLowCount = 0;
-volatile uint32_t g_uiAveragePeriod = 0;
-volatile uint32_t g_rxBitCount = 0;
-volatile int32_t  g_nBitState = 0;
-volatile bool     g_bFirstTransition = false;
-
-const uint64_t sync_word_fwd = 0b0011111111111101;
-const uint64_t sync_word_rev = 0b1011111111111100;
-
-/* Hwi_Struct for timer interrupt handlers */
-static Hwi_Struct wtimer0AHwiStruct;
-static Hwi_Struct wtimer0BHwiStruct;
-
-static Mailbox_Handle mailboxWord = NULL;
-static LTCFrameWord g_smpteFrameBuf;
+/*** Global Data Items ***/
 
 SMPTETimecode g_timecode;
+
+bool g_bPostInterrupts;
+bool g_decoderEnabled;
+bool g_bPostInterrupts;
+
+/*** Static Data Items ***/
+
+static volatile uint32_t gEdgeSeq         = 0;   /* bumped once per capture ISR */
+static uint32_t          gLastSeenEdgeSeq = 0;
+static uint32_t          gStaleMs         = 0;
+
+static bool              gRunning = false;
+static uint32_t          gTimerHz;
+static SMPTE_Decoder     gLtcDecoder;
+static Hwi_Struct        gCaptureHwiStruct;
+static Clock_Struct      gWatchdogClockStruct;
+
+/*** Static Function Prototypes ***/
+
+static Void DecodeTaskFxn(UArg arg0, UArg arg1);
+static void watchdogClockFxn(UArg arg);
+static void timerCaptureHwi(UArg arg);
+
+static void SMPTE_LTC_parseFrame(SMPTE_Decoder *dec);
+static void SMPTE_LTC_parseFrameReverse(SMPTE_Decoder *dec);
+static void resetLock(SMPTE_Decoder *dec);
 
 /*** External Data Items ***/
 
 extern SYSCFG g_cfg;
 extern uint32_t g_systemClock;
-
-/*** Static Function Prototypes ***/
-
-static Void DecodeTaskFxn(UArg arg0, UArg arg1);
-static Void WTimer0AHwi(UArg arg);
-static Void WTimer0BHwi(UArg arg);
-static void HandleEdgeChange(void);
-
-static uint64_t reverseBits64(uint64_t x);
 
 //*****************************************************************************
 //********************** SMPTE DECODER SUPPORT ********************************
@@ -149,35 +152,66 @@ static uint64_t reverseBits64(uint64_t x);
 
 void SMPTE_initDecoder(void)
 {
+    SMPTE_LTC_init(&gLtcDecoder);
+
+    gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
+
+    gTimerHz = SysCtlClockGet();
+
+    /* --- route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input --- */
+
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC));
+
+    GPIOPinConfigure(GPIO_PC4_WT0CCP0);
+    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
+
+    /* --- configure WTIMER0, sub-timer A, as 32-bit edge-time capture,
+     * up-counting --- */
+
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_WTIMER0));
+
+    TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_CAP_TIME_UP);
+    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFFu);
+
+    /* capture on both rising and falling edges -- biphase-mark decode
+     * needs the interval between every transition, not just one polarity
+     */
+    TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_BOTH_EDGES);
+    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    /* timer left disabled here -- SMPTE_HW_start() enables it */
+
+    /* --- construct (but do not yet enable) the capture interrupt --- */
+
     Error_Block eb;
-    Hwi_Params  hwiParams;
-    Task_Params taskParams;
-    Mailbox_Params mboxParams;
-
-    /* Create INT_WTIMER0 hardware interrupt handlers */
     Error_init(&eb);
+    Hwi_Params hwiParams;
     Hwi_Params_init(&hwiParams);
-    Hwi_construct(&(wtimer0AHwiStruct), INT_WTIMER0A, WTimer0AHwi, &hwiParams, &eb);
-    if (Error_check(&eb))
-        System_abort("Couldn't construct WTIMER0A error hwi");
+    hwiParams.priority   = 0x40;   /* tune to your system's priority scheme */
+    hwiParams.enableInt  = false;  /* stay masked until SMPTE_HW_start() */
 
-    /* Create INT_WTIMER0B hardware interrupt handler */
-    Error_init(&eb);
-    Hwi_Params_init(&hwiParams);
-    Hwi_construct(&(wtimer0BHwiStruct), INT_WTIMER0B, WTimer0BHwi, &hwiParams, &eb);
-    if (Error_check(&eb))
-        System_abort("Couldn't construct WTIMER0B error hwi");
+    Hwi_construct(&gCaptureHwiStruct, INT_WTIMER0A, timerCaptureHwi, &hwiParams, &eb);
 
-    /* Create SMPTE packet decoder mailbox */
-    Error_init(&eb);
-    Mailbox_Params_init(&mboxParams);
-    mailboxWord = Mailbox_create(sizeof(LTCFrameWord), 32, &mboxParams, &eb);
-    if (mailboxWord == NULL)
-        System_abort("Mailbox create failed");
+    if (Error_check(&eb)) {
+        System_abort("SMPTE_HW_init: failed to construct WTIMER0A capture Hwi\n");
+    }
+
+    /* --- construct (but do not yet start) the signal-loss watchdog --- */
+
+    Clock_Params clockParams;
+    Clock_Params_init(&clockParams);
+    clockParams.period    = SMPTE_WATCHDOG_PERIOD_MS;   /* assumes default 1ms Clock tick */
+    clockParams.startFlag = false;
+
+    Clock_construct(&gWatchdogClockStruct, watchdogClockFxn, SMPTE_WATCHDOG_PERIOD_MS, &clockParams);
+
 
     /* Create the SMPTE packet decoder task */
-    Error_init(&eb);
+    Task_Params taskParams;
     Task_Params_init(&taskParams);
+    Error_init(&eb);
     taskParams.stackSize = 2048;
     taskParams.priority  = 10;
     Task_create((Task_FuncPtr)DecodeTaskFxn, &taskParams, &eb);
@@ -189,16 +223,7 @@ void SMPTE_initDecoder(void)
 
 Void SMPTE_Decoder_Reset(void)
 {
-    g_smpteFrameBuf.raw.data = (uint64_t)0;
-    g_smpteFrameBuf.raw.sync = (uint16_t)0;
 
-    g_nBitState = 0;
-    g_bFirstTransition = false;
-
-    g_uiPeriod    = 0;
-    g_uiLowCount  = 0;
-    g_uiHighCount = 0;
-    g_rxBitCount  = 0;
 }
 
 //*****************************************************************************
@@ -207,63 +232,25 @@ Void SMPTE_Decoder_Reset(void)
 
 int SMPTE_Decoder_Start(void)
 {
-    g_decoderEnabled = true;
-    g_bPostInterrupts = false;
+    if (!gRunning)
+    {
+        SMPTE_LTC_init(&gLtcDecoder);
+        gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
 
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-    GPIO_write(Board_SMPTE_MUTE, PIN_HIGH);
-    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
-    GPIO_write(Board_DIRECTION, PIN_LOW);
-    GPIO_write(Board_BUSY_N, PIN_HIGH);
-    GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+        gEdgeSeq         = 0;
+        gLastSeenEdgeSeq = 0;
+        gStaleMs         = 0;
 
-    SMPTE_Decoder_Reset();
+        TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+        TimerEnable(WTIMER0_BASE, TIMER_A);
+        Hwi_enableInterrupt(INT_WTIMER0A);
 
-    /* Configure the GPIO for the Timer peripheral */
-    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5);
+        Clock_start(Clock_handle(&gWatchdogClockStruct));
 
-    /* Configure the GPIO to be CCP pins for the Timer peripheral */
-    GPIOPinConfigure(GPIO_PC4_WT0CCP0);
-    GPIOPinConfigure(GPIO_PC5_WT0CCP1);
+        gRunning = true;
+    }
 
-    /* Initialize Timers A and B to both run as periodic up-count edge capture
-     * This will split the 64-bit timer into two 32-bit timers.
-     */
-    TimerConfigure(WTIMER0_BASE, (TIMER_CFG_SPLIT_PAIR |
-                                  TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP |
-                                  TIMER_CFG_B_PERIODIC | TIMER_CFG_B_CAP_TIME_UP));
-
-    /* To use the wide timer in edge time mode, it must be preloaded with initial
-     * values. If the prescaler is used, then it must be preloaded as well.
-     * Since we want to use all 48-bits for both timers it will be loaded with
-     * the maximum of 0xFFFFFFFF for the 32-bit wide split timers, and 0xFF to add
-     * the additional 8-bits to the split timers with the prescaler.
-     */
-    TimerLoadSet(WTIMER0_BASE, TIMER_BOTH, 0xFFFFFFFF);
-    TimerPrescaleSet(WTIMER0_BASE, TIMER_BOTH, 0x00);
-
-    /* Configure Timer A to trigger on a Positive Edge and configure
-     * Timer B to trigger on a Negative Edge.
-     */
-    TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_POS_EDGE);
-    TimerControlEvent(WTIMER0_BASE, TIMER_B, TIMER_EVENT_NEG_EDGE);
-
-    /* Clear the interrupt status flag.  This is done to make sure the
-     * interrupt flag is cleared before we enable it.
-     */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
-
-    /* Enable the Timer A and B interrupts for Capture Events */
-    TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
-
-    /* Enable the interrupts for Timer A and Timer B on the processor (NVIC) */
-    IntEnable(INT_WTIMER0A);
-    IntEnable(INT_WTIMER0B);
-
-    /* Enable both Timer A and Timer B to begin the application */
-    TimerEnable(WTIMER0_BASE, TIMER_BOTH);
-
-    return 1;
+    return 0;
 }
 
 //*****************************************************************************
@@ -272,171 +259,89 @@ int SMPTE_Decoder_Start(void)
 
 int SMPTE_Decoder_Stop(void)
 {
-    /* Disable both Timer A and Timer B */
-    TimerDisable(WTIMER0_BASE, TIMER_BOTH);
+    if (gRunning)
+    {
+        Clock_stop(Clock_handle(&gWatchdogClockStruct));
 
-    IntDisable(INT_WTIMER0A);
-    IntDisable(INT_WTIMER0B);
+        Hwi_disableInterrupt(INT_WTIMER0A);
+        TimerDisable(WTIMER0_BASE, TIMER_A);
 
-    /* Disable the Timer A and B interrupts for Capture Events */
-    TimerIntDisable(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
+        /* Status LED */
+        GPIO_write(Board_STAT_LED, Board_LED_ON);
 
-    /* Clear any interrupts pending */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
+        /* SMPTE input mute on */
+        GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
+        GPIO_write(Board_FRAME_SYNC, PIN_LOW);
+        GPIO_write(Board_DIRECTION, PIN_LOW);
+        GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+        GPIO_write(Board_BUSY_N, PIN_HIGH);
 
-    /* Status LED */
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-
-    /* SMPTE input mute on */
-    GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
-    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
-    GPIO_write(Board_DIRECTION, PIN_LOW);
-    GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
-    GPIO_write(Board_BUSY_N, PIN_HIGH);
-
-    g_bPostInterrupts = false;
-    g_decoderEnabled = false;
+        gRunning = false;
+    }
 
     return 1;
 }
 
-//*****************************************************************************
-// SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
-//*****************************************************************************
-
-/* Rising Edge Interrupt (Start of Pulse) */
-Void WTimer0AHwi(UArg arg)
+SMPTE_Decoder *SMPTE_HW_getDecoder(void)
 {
-    /* Echo high pin change to SYNC pin */
-    GPIO_write(Board_FRAME_SYNC, PIN_HIGH);
+    return &gLtcDecoder;
+}
 
-    /* Clear the timer interrupt */
+bool SMPTE_HW_isRunning(void)
+{
+    return gRunning;
+}
+
+uint32_t SMPTE_HW_getTimerHz(void)
+{
+    return gTimerHz;
+}
+
+/*
+ * WTIMER0A capture interrupt. Runs in Hwi context. The edge time itself
+ * was already latched by hardware the instant the pin transitioned; all
+ * this ISR does is clear the flag and read the latched value out, so its
+ * own scheduling latency doesn't touch the timestamp's accuracy.
+ */
+
+static void timerCaptureHwi(UArg arg)
+{
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
-
-    /* Store the start time */
-    g_uiHighCount = TimerValueGet(WTIMER0_BASE, TIMER_A);
-
-    /* Call the edge change interrupt handler */
-    HandleEdgeChange();
+    uint32_t capturedTick = TimerValueGet(WTIMER0_BASE, TIMER_A);
+    gEdgeSeq++;
+    SMPTE_LTC_onEdge(&gLtcDecoder, capturedTick);
 }
 
-/* Falling Edge Interrupt (End of Pulse) */
-Void WTimer0BHwi(UArg arg)
+/*
+ * Runs periodically in Swi context (TI-RTOS Clock functions run at Swi
+ * level). Purely counts elapsed watchdog periods since gEdgeSeq last
+ * changed -- deliberately independent of the capture timer itself, per
+ * the note in the file header.
+ */
+
+static void watchdogClockFxn(UArg arg)
 {
-    /* Echo low pin change to SYNC pin */
-    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
-
-    /* Clear the timer interrupt */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
-
-    /* Store the end time */
-    g_uiLowCount = TimerValueGet(WTIMER0_BASE, TIMER_B);
-
-    /* Call the edge change interrupt handler */
-    HandleEdgeChange();
-}
-
-//*****************************************************************************
-// Handle high and low hardware level edge change interrupts while
-// shifting in bits of the SMPTE data into our 80-bit packet buffer.
-//*****************************************************************************
-
-void HandleEdgeChange(void)
-{
-    bool new_bit_flag = false;
-
-    /* Calculate the pulse period from rising edge to falling edge */
-    if (g_uiLowCount > g_uiHighCount)
-        g_uiPeriod = g_uiLowCount - g_uiHighCount;
-    else
-        g_uiPeriod = g_uiHighCount - g_uiLowCount;
-
-    /* Calculate the average pulse period */
-    g_uiAveragePeriod = (g_uiPeriod >> 2);
-
-    /* Normally we'd divide the period count by 80 here to get the pulse
-     * time in microseconds. However, we scale all the other timing
-     * constants by 80 instead to avoid this division. Now look at the
-     * period and decide if the bit is a one or zero.
-     */
-    if ((g_uiPeriod >= ONE_TIME_MIN) && (g_uiPeriod < ONE_TIME_MAX))
-    {
-        if (g_bFirstTransition)
-        {
-            /* First bit transition */
-            g_bFirstTransition = false;
-        }
-        else
-        {
-            // Second bit transition
-            g_nBitState = 1;
-            g_bFirstTransition = true;
-            new_bit_flag = true;
-        }
-    }
-    else if ((g_uiPeriod >= ZERO_TIME_MIN) && (g_uiPeriod < ZERO_TIME_MAX))
-    {
-        g_nBitState = 0;
-        g_bFirstTransition = true;
-        new_bit_flag = true;
-    }
-    else
-    {
-        /* Either it's the first bit change, or data timing is wrong! */
-        new_bit_flag = false;
+    if (!gRunning) {
+        return;
     }
 
-    if (new_bit_flag)
+    if (gEdgeSeq == gLastSeenEdgeSeq)
     {
-        LTCFrameBits* frame = &g_smpteFrameBuf.raw;
-
-        /* Shift the 16-bit sync word bits */
-        frame->sync = frame->sync << 1;
-
-        /* Carry bit-63 into sync bit-0 if needed, otherwise it's a zero bit */
-        if (frame->data & 0x8000000000000000)
-            frame->sync |= 1;
-
-        /* Shift the 80-bit frame word bits */
-        frame->data = frame->data << 1;
-
-        /* Add in new smpte word bit, either zero or a one */
-        if (g_nBitState)
-            frame->data |= 1;
-
-        /* The 16-bit SMPTE sync word must be at the end of the frame
-         * to consider it a valid 80-bit SMPTE frame.
-         */
-        if (++g_rxBitCount >= LTC_FRAME_BIT_COUNT)
+        if (gStaleMs < SMPTE_WATCHDOG_TIMEOUT_MS)
         {
-            if (frame->sync == sync_word_fwd)
+            gStaleMs += SMPTE_WATCHDOG_PERIOD_MS;
+
+            if (gStaleMs >= SMPTE_WATCHDOG_TIMEOUT_MS)
             {
-                /* Post the 64-bit SMPTE word to decode task */
-                Mailbox_post(mailboxWord, frame, BIOS_NO_WAIT);
-
-                /* Reset bit counter and buffer */
-                g_rxBitCount = 0;
+                SMPTE_LTC_onTimeout(&gLtcDecoder);   /* fires once per stall event */
             }
         }
     }
-}
-
-//*****************************************************************************
-// SMPTE Input Edge Timing Interrupts (32-BIT WIDE TIMER IMPLEMENTATION)
-//*****************************************************************************
-
-uint64_t reverseBits64(uint64_t x)
-{
-    unsigned int s = sizeof(x) * 8;
-    uint64_t mask = ~((uint64_t)0);
-
-    while ((s >>= 1) > 0)
+    else
     {
-        mask ^= mask << s;
-        x = ((x >> s) & mask) | ((x << s) & ~mask);
+        gLastSeenEdgeSeq = gEdgeSeq;
+        gStaleMs         = 0;
     }
-
-    return x;
 }
 
 //*****************************************************************************
@@ -449,7 +354,6 @@ uint64_t reverseBits64(uint64_t x)
 
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
-    LTCFrameWord word;
     uint32_t key;
 
     /* Initialize and start edge decode interrupts */
@@ -462,30 +366,21 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
     while (true)
     {
         /* Wait for an 80-bit timecode word */
-        if (!Mailbox_pend(mailboxWord, &word, 100))
+        //if (!Mailbox_pend(mailboxWord, &word, 100))
         {
             GPIO_write(Board_STAT_LED, Board_LED_ON);
-            continue;
+            //continue;
         }
 
         /* Toggle the LED on each packet received */
         GPIO_toggle(Board_STAT_LED);
 
-        /* Set direction indicator pin */
-        if (word.ltc.sync_word == sync_word_rev)
-            GPIO_write(Board_DIRECTION, PIN_HIGH);
-        else
-            GPIO_write(Board_DIRECTION, PIN_LOW);
-
-        /* Reverse all 64-bits in the data part of the SMPTE frame */
-        word.raw.data = reverseBits64(word.raw.data);
-
         /* Now extract any time and other data from the packet */
         key = GateMutex_enter(gateMutex0);
-        g_timecode.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
-        g_timecode.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
-        g_timecode.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
-        g_timecode.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
+        //g_timecode.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
+        //g_timecode.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
+        //g_timecode.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
+        //g_timecode.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
         GateMutex_leave(gateMutex0, key);
 
         /* Assert the interrupt line to notify host packet is ready  */
@@ -549,5 +444,342 @@ static void ltcConsumerTaskFxn(UArg a0, UArg a1)
     }
 }
 #endif
+
+/* Initialize the decoder */
+
+void SMPTE_LTC_init(SMPTE_Decoder *dec)
+{
+    memset(dec, 0, sizeof(*dec));
+
+    /* full 32-bit range; narrow this after init.
+     * if your tick source is smaller (see smpte_ltc.h)
+     */
+    dec->tickMask = 0xFFFFFFFFu;
+}
+
+/* Forward-window bit access: frame[] is a continuously-shifting 80-bit
+ * window, oldest bit at frame[0] bit7, newest at frame[9] bit0
+ */
+
+static inline uint8_t frameGetBit(const uint8_t *frame, uint8_t smpteBitIndex)
+{
+    uint8_t posFromLsb = (uint8_t)(79u - smpteBitIndex);
+    uint8_t byteIdx    = (uint8_t)(9u - (posFromLsb >> 3));
+    uint8_t bitInByte  = (uint8_t)(posFromLsb & 0x7u);
+
+    return (uint8_t)((frame[byteIdx] >> bitInByte) & 0x1u);
+}
+
+/* -- reverse-buffer bit access: revData[] is a plain 64-bit buffer already
+ * indexed by true SMPTE bit index (0 = MSB of revData[0]), since bits are
+ * written to their real index as they arrive --
+ */
+
+static inline void bufSetBit(uint8_t *buf, uint8_t bitIndex, uint8_t val)
+{
+    uint8_t byteIdx   = (uint8_t)(bitIndex >> 3);
+    uint8_t bitInByte = (uint8_t)(7u - (bitIndex & 0x7u));
+    if (val) {
+        buf[byteIdx] = (uint8_t)(buf[byteIdx] | (1u << bitInByte));
+    } else {
+        buf[byteIdx] = (uint8_t)(buf[byteIdx] & ~(1u << bitInByte));
+    }
+}
+
+static inline uint8_t bufGetBit(const uint8_t *buf, uint8_t bitIndex)
+{
+    uint8_t byteIdx   = (uint8_t)(bitIndex >> 3);
+    uint8_t bitInByte = (uint8_t)(7u - (bitIndex & 0x7u));
+    return (uint8_t)((buf[byteIdx] >> bitInByte) & 0x1u);
+}
+
+/* SMPTE fields are transmitted LSB-first, so bit `startBit` is the LSB of
+ * the field. Same convention for both accessors above.
+ */
+
+typedef uint8_t (*BitGetter)(const uint8_t *, uint8_t);
+
+static uint32_t getField(BitGetter get, const uint8_t *buf, uint8_t startBit, uint8_t numBits)
+{
+    uint32_t val = 0;
+    uint8_t k;
+    for (k = 0; k < numBits; k++) {
+        val |= ((uint32_t)get(buf, (uint8_t)(startBit + k))) << k;
+    }
+    return val;
+}
+
+/* SMPTE 12M bit offsets (identical for both directions -- direction only
+ * changes how the 64 data bits got collected, not what they mean). The
+ * non-drop / drop-frame 30 fps and 25 fps EBU variants share this layout;
+ * only the interpretation of bit 10 (drop frame flag, meaningless at 25
+ * fps) and the BGF flag bits differs between variants -- that
+ * interpretation is application knowledge, not something decodable
+ * purely from the bitstream.
+ */
+
+enum {
+    BIT_FRAME_UNITS = 0,   /* 4 bits */
+    BIT_USER1       = 4,   /* 4 bits */
+    BIT_FRAME_TENS  = 8,   /* 2 bits */
+    BIT_DROP_FRAME  = 10,  /* 1 bit  */
+    BIT_COLOR_FRAME = 11,  /* 1 bit  */
+    BIT_USER2       = 12,  /* 4 bits */
+    BIT_SEC_UNITS   = 16,  /* 4 bits */
+    BIT_USER3       = 20,  /* 4 bits */
+    BIT_SEC_TENS    = 24,  /* 3 bits */
+    /* bit 27 = BGF/polarity-correction flag, not decoded here */
+    BIT_USER4       = 28,  /* 4 bits */
+    BIT_MIN_UNITS   = 32,  /* 4 bits */
+    BIT_USER5       = 36,  /* 4 bits */
+    BIT_MIN_TENS    = 40,  /* 3 bits */
+    /* bit 43 = BGF flag, not decoded here */
+    BIT_USER6       = 44,  /* 4 bits */
+    BIT_HOUR_UNITS  = 48,  /* 4 bits */
+    BIT_USER7       = 52,  /* 4 bits */
+    BIT_HOUR_TENS   = 56,  /* 2 bits */
+    /* bits 58-59 = BGF flags, not decoded here */
+    BIT_USER8       = 60   /* 4 bits */
+    /* bits 64-79 = sync word, checked directly in SMPTE_LTC_onEdge() */
+};
+
+static void parseCommon(SMPTE_Timecode *tc, BitGetter get, const uint8_t *buf)
+{
+    tc->frames  = (uint8_t)(getField(get, buf, BIT_FRAME_TENS, 2) * 10u +
+                             getField(get, buf, BIT_FRAME_UNITS, 4));
+    tc->seconds = (uint8_t)(getField(get, buf, BIT_SEC_TENS, 3) * 10u +
+                             getField(get, buf, BIT_SEC_UNITS, 4));
+    tc->minutes = (uint8_t)(getField(get, buf, BIT_MIN_TENS, 3) * 10u +
+                             getField(get, buf, BIT_MIN_UNITS, 4));
+    tc->hours   = (uint8_t)(getField(get, buf, BIT_HOUR_TENS, 2) * 10u +
+                             getField(get, buf, BIT_HOUR_UNITS, 4));
+
+    tc->dropFrame  = getField(get, buf, BIT_DROP_FRAME, 1)  != 0;
+    tc->colorFrame = getField(get, buf, BIT_COLOR_FRAME, 1) != 0;
+
+    tc->userBits[0] = (uint8_t)getField(get, buf, BIT_USER1, 4);
+    tc->userBits[1] = (uint8_t)getField(get, buf, BIT_USER2, 4);
+    tc->userBits[2] = (uint8_t)getField(get, buf, BIT_USER3, 4);
+    tc->userBits[3] = (uint8_t)getField(get, buf, BIT_USER4, 4);
+    tc->userBits[4] = (uint8_t)getField(get, buf, BIT_USER5, 4);
+    tc->userBits[5] = (uint8_t)getField(get, buf, BIT_USER6, 4);
+    tc->userBits[6] = (uint8_t)getField(get, buf, BIT_USER7, 4);
+    tc->userBits[7] = (uint8_t)getField(get, buf, BIT_USER8, 4);
+}
+
+static void SMPTE_LTC_parseFrame(SMPTE_Decoder *dec)
+{
+    parseCommon(&dec->tc, frameGetBit, dec->frame);
+    dec->tc.direction = SMPTE_DIR_FORWARD;
+}
+
+static void SMPTE_LTC_parseFrameReverse(SMPTE_Decoder *dec)
+{
+    parseCommon(&dec->tc, bufGetBit, dec->revData);
+    dec->tc.direction = SMPTE_DIR_REVERSE;
+}
+
+/* Shared reset for both a hard dropout detected inline in onEdge() and an
+ * externally-detected total-silence timeout (onTimeout()). Clears clock
+ * recovery and every in-progress bit-accumulation buffer so a fresh
+ * signal locks cleanly rather than risking a spurious match against
+ * stale leftover bits. Deliberately does NOT touch dec->tc / frameReady /
+ * frameCount -- the last decoded timecode stays available to the
+ * consumer alongside the error flags.
+ */
+
+static void resetLock(SMPTE_Decoder *dec)
+{
+    dec->haveLastEdge    = false;
+    dec->avgHalfBitTicks = 0;
+    dec->halfBitPending  = false;
+    dec->signalPresent   = false;
+    dec->revBitCount     = 0;
+    dec->bitsSinceSync   = 0;
+    dec->direction       = SMPTE_DIR_UNKNOWN;
+    memset(dec->frame, 0, sizeof(dec->frame));
+    memset(dec->revData, 0, sizeof(dec->revData));
+}
+
+void SMPTE_LTC_onTimeout(SMPTE_Decoder *dec)
+{
+    resetLock(dec);
+    dec->timedOut = true;
+    dec->timeoutCount++;
+}
+
+bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
+{
+    if (!dec->haveLastEdge)
+    {
+        dec->lastEdgeTick = nowTicks;
+        dec->haveLastEdge = true;
+        return false;
+    }
+
+    /* unsigned sub, masked to the tick counter's actual width, so a
+     * hardware counter narrower than 32 bits (e.g. a 24-bit CCP capture
+     * register) still wraps correctly instead of producing one huge
+     * bogus interval every rollover
+     */
+
+    uint32_t delta = (nowTicks - dec->lastEdgeTick) & dec->tickMask;
+
+    dec->lastEdgeTick = nowTicks;
+
+    if (delta < SMPTE_MIN_INTERVAL_TICKS)
+    {
+        return false;   /* glitch, don't disturb clock recovery */
+    }
+
+    if (dec->avgHalfBitTicks == 0)
+    {
+        /* bootstrap: seed the running average with the first plausible
+         * interval; it will settle within a handful of edges. */
+
+        dec->avgHalfBitTicks = delta;
+
+        return false;
+    }
+
+    uint32_t shortMax = dec->avgHalfBitTicks + (dec->avgHalfBitTicks >> 1); /* ~1.5x */
+    uint32_t longMax  = dec->avgHalfBitTicks * 3u;                          /* generous outer bound */
+
+    bool isShort;
+
+    if (delta <= shortMax)
+    {
+        isShort = true;
+    }
+    else if (delta <= longMax)
+    {
+        isShort = false;
+    }
+    else
+    {
+        /* way outside expectation: dropout, cable unplugged, huge speed
+         * change (fast-wind). Drop clock-recovery lock and start over. */
+
+        resetLock(dec);
+
+        dec->badSyncCount++;
+
+        return false;
+    }
+
+    dec->signalPresent = true;
+    dec->timedOut      = false;   /* real edges are arriving again */
+
+    bool    bitReady = false;
+    uint8_t bitVal   = 0;
+
+    if (!isShort)
+    {
+        /* one long interval = a full bit cell with no mid-cell transition -> "0" */
+
+        dec->halfBitPending = false;  /* a stray pending half is discarded */
+        bitVal   = 0;
+        bitReady = true;
+
+        /* long intervals are a solid timing reference; nudge the average
+         * gently using half the long interval
+         */
+        dec->avgHalfBitTicks = (uint32_t)((int32_t)dec->avgHalfBitTicks +
+                                (((int32_t)(delta >> 1) - (int32_t)dec->avgHalfBitTicks) / 8));
+    }
+    else
+    {
+        /* short interval = half a bit cell */
+
+        if (!dec->halfBitPending)
+        {
+            dec->halfBitPending = true;    /* first half seen, wait for the second */
+        }
+        else
+        {
+            dec->halfBitPending = false;
+            bitVal   = 1;
+            bitReady = true;
+        }
+
+        dec->avgHalfBitTicks = (uint32_t)((int32_t)dec->avgHalfBitTicks +
+                                (((int32_t)delta - (int32_t)dec->avgHalfBitTicks) / 8));
+    }
+
+    if (!bitReady) {
+        return false;
+    }
+
+    dec->bitsSinceSync++;
+
+    /* feed the forward continuously-shifting window (used for forward
+     * sync detection and forward field extraction)
+     */
+
+    int i;
+
+    for (i = 0; i < 9; i++)
+    {
+        dec->frame[i] = (uint8_t)((dec->frame[i] << 1) | (dec->frame[i + 1] >> 7));
+    }
+
+    dec->frame[9] = (uint8_t)((dec->frame[9] << 1) | bitVal);
+
+    /* also feed the reverse-direction data collector, in case a
+     * reverse frame is currently mid-collection. Harmless no-op once 64
+     * bits are already collected and awaiting confirmation.
+     */
+
+    if (dec->revBitCount < 64u)
+    {
+        uint8_t idx = (uint8_t)(63u - dec->revBitCount);
+        bufSetBit(dec->revData, idx, bitVal);
+        dec->revBitCount++;
+    }
+
+    uint16_t tail = (uint16_t)(((uint16_t)dec->frame[8] << 8) | dec->frame[9]);
+
+    bool gotFrame = false;
+
+    if (tail == SMPTE_SYNC_WORD)
+    {
+        /* a genuine frame is always exactly 80 bits; flag (but still
+         * resync to) anything else as a framing anomaly
+         */
+
+        if (dec->direction == SMPTE_DIR_FORWARD && dec->bitsSinceSync != 80u)
+        {
+            dec->badSyncCount++;
+        }
+
+        SMPTE_LTC_parseFrame(dec);
+        dec->direction     = SMPTE_DIR_FORWARD;
+        dec->bitsSinceSync = 0;
+        dec->revBitCount   = 0;   /* discard any stale reverse-collection in progress */
+        dec->tc.frameCount++;
+        dec->frameReady = true;
+        gotFrame = true;
+    }
+    else if (tail == SMPTE_SYNC_WORD_REVERSE)
+    {
+        if (dec->direction == SMPTE_DIR_REVERSE && dec->revBitCount == 64u)
+        {
+            SMPTE_LTC_parseFrameReverse(dec);
+            dec->tc.frameCount++;
+            dec->frameReady = true;
+            gotFrame = true;
+        }
+        else if (dec->direction == SMPTE_DIR_REVERSE)
+        {
+            dec->badSyncCount++;   /* wrong bit count collected between reverse syncs */
+        }
+
+        dec->direction     = SMPTE_DIR_REVERSE;
+        dec->revBitCount   = 0;    /* this sync starts the *next* frame's collection */
+        dec->bitsSinceSync = 0;
+    }
+
+    return gotFrame;
+}
 
 /* End-Of-File */
