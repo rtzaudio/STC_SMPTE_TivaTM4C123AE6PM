@@ -67,3 +67,4 @@ $RECYCLE.BIN/
 *.lnk
 *.aem4f
 .clangd
+.cproject
