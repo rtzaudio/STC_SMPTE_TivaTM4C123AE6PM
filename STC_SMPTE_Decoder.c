@@ -158,18 +158,7 @@ void SMPTE_initDecoder(void)
 
     gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
 
-    /* --- construct the capture interrupt handler --- */
-
-    Error_Block eb;
-    Error_init(&eb);
-    Hwi_Params hwiParams;
-    Hwi_Params_init(&hwiParams);
-    hwiParams.priority   = 0x40;   /* tune to your system's priority scheme */
-    hwiParams.enableInt  = false;  /* stay masked until SMPTE_HW_start() */
-    Hwi_construct(&gCaptureHwiStruct, INT_WTIMER0A, timerCaptureHwi, &hwiParams, &eb);
-    if (Error_check(&eb)) {
-        System_abort("SMPTE_HW_init: failed to construct WTIMER0A capture Hwi\n");
-    }
+    //Hwi_plug(INT_WTIMER0A, timerCaptureHwi);
 
     /* --- route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input --- */
 
@@ -183,7 +172,6 @@ void SMPTE_initDecoder(void)
 
     /* First make sure the timer is disabled */
     TimerDisable(WTIMER0_BASE, TIMER_A);
-    TimerDisable(WTIMER0_BASE, TIMER_B);
 
     /* Disable global interrupts */
     IntMasterDisable();
@@ -191,12 +179,11 @@ void SMPTE_initDecoder(void)
     GPIOPinConfigure(GPIO_PC4_WT0CCP0);
     GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
 
-    TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_CAP_TIME_UP);
-    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFFu);
-
     /* capture on both rising and falling edges -- biphase-mark decode
      * needs the interval between every transition, not just one polarity
      */
+    TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_CAP_TIME_UP);
+    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFFu);
     TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_BOTH_EDGES);
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
     TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
@@ -206,12 +193,23 @@ void SMPTE_initDecoder(void)
     IntMasterEnable();
 
     /* --- construct (but do not yet start) the signal-loss watchdog --- */
-
     Clock_Params clockParams;
     Clock_Params_init(&clockParams);
     clockParams.period    = SMPTE_WATCHDOG_PERIOD_MS;   /* assumes default 1ms Clock tick */
     clockParams.startFlag = false;
     Clock_construct(&gWatchdogClockStruct, watchdogClockFxn, SMPTE_WATCHDOG_PERIOD_MS, &clockParams);
+
+    /* --- construct the capture interrupt handler --- */
+    Error_Block eb;
+    Error_init(&eb);
+    Hwi_Params hwiParams;
+    Hwi_Params_init(&hwiParams);
+    hwiParams.priority   = 0x40;   /* tune to your system's priority scheme */
+    hwiParams.enableInt  = false;  /* stay masked until SMPTE_HW_start() */
+    Hwi_construct(&gCaptureHwiStruct, INT_WTIMER0A, timerCaptureHwi, &hwiParams, &eb);
+    if (Error_check(&eb)) {
+        System_abort("SMPTE_HW_init: failed to construct WTIMER0A capture Hwi\n");
+    }
 
     /* Create the SMPTE packet decoder task */
     Task_Params taskParams;
