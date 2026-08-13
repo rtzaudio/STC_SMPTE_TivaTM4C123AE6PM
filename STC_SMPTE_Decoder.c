@@ -167,24 +167,22 @@ void SMPTE_initDecoder(void)
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_WTIMER0));
 
-    /* --- configure WTIMER0, sub-timer A, as 32-bit edge-time capture,
-     * up-counting --- */
-
-    /* First make sure the timer is disabled */
-    TimerDisable(WTIMER0_BASE, TIMER_A);
-
     /* Disable global interrupts */
     IntMasterDisable();
 
+    /* Configure PC4 to WT0CCP0 timer input */
     GPIOPinConfigure(GPIO_PC4_WT0CCP0);
     GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
 
-    /* capture on both rising and falling edges -- biphase-mark decode
+    /* Capture on both rising and falling edges -- biphase-mark decode
      * needs the interval between every transition, not just one polarity
+     * Configure WTIMER0, sub-timer A, as 32-bit edge-time capture,
+     * up-counting
      */
+    TimerDisable(WTIMER0_BASE, TIMER_A);
     TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_CAP_TIME_UP);
-    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFFu);
     TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_BOTH_EDGES);
+    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFFu);
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
     TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
     /* timer left disabled here -- SMPTE_HW_start() enables it */
@@ -314,9 +312,13 @@ uint32_t SMPTE_HW_getTimerHz(void)
 
 static void timerCaptureHwi(UArg arg)
 {
+    /* Clear the interrupt flag first */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    /* Read time at which interrupt occurred */
     uint32_t capturedTick = TimerValueGet(WTIMER0_BASE, TIMER_A);
+    /* increment edge counter */
     gEdgeSeq++;
+    /* process the capture tick state */
     SMPTE_LTC_onEdge(&gLtcDecoder, capturedTick);
 }
 
