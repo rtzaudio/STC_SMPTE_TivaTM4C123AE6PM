@@ -172,7 +172,11 @@ void SMPTE_initDecoder(void)
 
     /* Configure PC4 to WT0CCP0 timer input */
     GPIOPinConfigure(GPIO_PC4_WT0CCP0);
-    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
+    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5);
+
+    /* Configure the GPIO to be CCP pins for the Timer peripheral */
+    GPIOPinConfigure(GPIO_PC4_WT0CCP0);
+    GPIOPinConfigure(GPIO_PC5_WT0CCP1);
 
     /* Capture on both rising and falling edges -- biphase-mark decode
      * needs the interval between every transition, not just one polarity
@@ -303,8 +307,7 @@ uint32_t SMPTE_HW_getTimerHz(void)
     return gTimerHz;
 }
 
-/*
- * WTIMER0A capture interrupt. Runs in Hwi context. The edge time itself
+/* WTIMER0A capture interrupt. Runs in Hwi context. The edge time itself
  * was already latched by hardware the instant the pin transitioned; all
  * this ISR does is clear the flag and read the latched value out, so its
  * own scheduling latency doesn't touch the timestamp's accuracy.
@@ -314,16 +317,18 @@ static void timerCaptureHwi(UArg arg)
 {
     /* Clear the interrupt flag first */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+
     /* Read time at which interrupt occurred */
     uint32_t capturedTick = TimerValueGet(WTIMER0_BASE, TIMER_A);
+
     /* increment edge counter */
     gEdgeSeq++;
+    
     /* process the capture tick state */
     SMPTE_LTC_onEdge(&gLtcDecoder, capturedTick);
 }
 
-/*
- * Runs periodically in Swi context (TI-RTOS Clock functions run at Swi
+/* Runs periodically in Swi context (TI-RTOS Clock functions run at Swi
  * level). Purely counts elapsed watchdog periods since gEdgeSeq last
  * changed -- deliberately independent of the capture timer itself, per
  * the note in the file header.
@@ -354,13 +359,12 @@ static void watchdogClockFxn(UArg arg)
     }
 }
 
-//*****************************************************************************
-// This task decodes 80-bit SMPTE packets fed to it from the edge interrupt
-// handlers. Once a valid packet sync word is found in the stream, the 64-bit
-// word is passed to this task to extract and decode all the time and other
-// information to provide the main SPI host task with the time code
-// information needed via an SPI interrupt.
-//*****************************************************************************
+/* This task decodes 80-bit SMPTE packets fed to it from the edge interrupt
+ * handlers. Once a valid packet sync word is found in the stream, the 64-bit
+ * word is passed to this task to extract and decode all the time and other
+ * information to provide the main SPI host task with the time code
+ * information needed via an SPI interrupt.
+ */
 
 Void DecodeTaskFxn(UArg arg0, UArg arg1)
 {
