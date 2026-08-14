@@ -99,7 +99,7 @@ typedef struct {
     uint8_t  userBits[8];      /* 8 x 4-bit user-bit nibbles, raw */
     uint32_t frameCount;       /* running count of decoded frames, for rate/health checks */
     SMPTE_Direction direction; /* direction this specific frame was decoded in */
-} SMPTE_Timecode;
+} SMPTE_DecoderTimecode;
 
 /* Opaque-ish decoder state -- allocate one instance per LTC input channel. */
 
@@ -137,7 +137,7 @@ typedef struct {
     uint32_t bitsSinceSync;         /* bits accepted since the last confirmed forward sync, for a
                                      * frame-length sanity check (a genuine frame is always 80 bits) */
     /* decoded output */
-    SMPTE_Timecode tc;
+    SMPTE_DecoderTimecode tc;
     volatile bool  frameReady;      /* set in ISR context when a new frame has been parsed */
 
     /* health / diagnostics */

@@ -2,7 +2,7 @@
  *
  * DTC-1200 Digital Transport Controller for Ampex MM-1200 Tape Machines
  *
- * Copyright (C) 2021-2024, RTZ Professional Audio, LLC
+ * Copyright (C) 2021-2026, RTZ Professional Audio, LLC
  * All Rights Reserved
  *
  * RTZ is registered trademark of RTZ Professional Audio, LLC
@@ -439,7 +439,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
     bool wasTimedOut = false;
     uint32_t key;
     uint32_t lastBadSyncCount = 0;
-    SMPTE_Timecode local;
+    SMPTE_DecoderTimecode local;
 
     SMPTE_Decoder *dec = SMPTE_HW_getDecoder();
 
@@ -613,7 +613,7 @@ enum {
     /* bits 64-79 = sync word, checked directly in SMPTE_LTC_onEdge() */
 };
 
-static void parseCommon(SMPTE_Timecode *tc, BitGetter get, const uint8_t *buf)
+static void parseCommon(SMPTE_DecoderTimecode *tc, BitGetter get, const uint8_t *buf)
 {
     tc->frames  = (uint8_t)(getField(get, buf, BIT_FRAME_TENS, 2) * 10u +
                              getField(get, buf, BIT_FRAME_UNITS, 4));
