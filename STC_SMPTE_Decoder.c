@@ -124,10 +124,9 @@ static volatile uint32_t gEdgeSeq         = 0;   /* bumped once per capture ISR 
 static uint32_t          gLastSeenEdgeSeq = 0;
 static uint32_t          gStaleMs         = 0;
 
-static bool              g_decoderEnabled = false;
 static uint32_t          gTimerHz;
-static SMPTE_Decoder     gLtcDecoder;
 static Clock_Struct      gWatchdogClockStruct;
+static SMPTE_Decoder     gLtcDecoder;
 
 /* Data shared with interrupt handlers and tasks */
 static volatile uint32_t g_uiPeriod = 0;
