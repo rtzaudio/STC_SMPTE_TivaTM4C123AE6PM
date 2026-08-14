@@ -248,12 +248,12 @@ int SMPTE_Decoder_Start(void)
         gStaleMs         = 0;
 
         TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+
         TimerEnable(WTIMER0_BASE, TIMER_A);
+        TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
 
         /* Enable timer A & B interrupts ???? */
         IntEnable(INT_WTIMER0A);
-
-        Hwi_enableInterrupt(INT_WTIMER0A);
 
         Clock_start(Clock_handle(&gWatchdogClockStruct));
 
