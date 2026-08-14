@@ -139,8 +139,8 @@ static volatile uint32_t g_uiLowCount = 0;
 
 /*** Static Function Prototypes ***/
 
-static Void WTimer0AHwi(UArg arg);
-static Void WTimer0BHwi(UArg arg);
+static Void WTimer0AHwi(UArg arg);      /* rising edge int handler  */
+static Void WTimer0BHwi(UArg arg);      /* falling edge int handler */
 
 static Void DecodeTaskFxn(UArg arg0, UArg arg1);
 static void watchdogClockFxn(UArg arg);
@@ -355,8 +355,7 @@ uint32_t SMPTE_HW_getTimerHz(void)
     return gTimerHz;
 }
 
-/*
- * WTIMER0A capture interrupt. Runs in Hwi context. The edge time itself
+/* WTIMER0A capture interrupt. Runs in Hwi context. The edge time itself
  * was already latched by hardware the instant the pin transitioned; all
  * this ISR does is clear the flag and read the latched value out, so its
  * own scheduling latency doesn't touch the timestamp's accuracy.
@@ -398,7 +397,6 @@ Void WTimer0BHwi(UArg arg)
     GPIO_write(Board_FRAME_SYNC, PIN_LOW);
     /* Store the end time */
     g_uiLowCount = TimerValueGet(WTIMER0_BASE, TIMER_B);
-
     /* Call the edge change interrupt handler */
     SMPTE_LTC_onEdge(&gLtcDecoder, g_uiLowCount);
 }
@@ -424,7 +422,8 @@ static void watchdogClockFxn(UArg arg)
 
             if (gStaleMs >= SMPTE_WATCHDOG_TIMEOUT_MS)
             {
-                SMPTE_LTC_onTimeout(&gLtcDecoder);   /* fires once per stall event */
+                /* fires once per stall event */
+                SMPTE_LTC_onTimeout(&gLtcDecoder);
             }
         }
     }
@@ -472,6 +471,19 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
                           local.seconds, local.frames,
                           local.dropFrame ? " DF" : "",
                           local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
+
+            /* Now extract any time and other data from the packet */
+            key = GateMutex_enter(gateMutex0);
+            g_timecode.frame = (uint8_t)local.frames;
+            g_timecode.secs  = (uint8_t)local.seconds;
+            g_timecode.mins  = (uint8_t)local.minutes;
+            g_timecode.hours = (uint8_t)local.hours;
+            GateMutex_leave(gateMutex0, key);
+
+            if (g_bPostInterrupts)
+            {
+                GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
+            }
         }
 
         if (dec->signalPresent != wasSignalPresent)
