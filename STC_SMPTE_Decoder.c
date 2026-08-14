@@ -128,14 +128,22 @@ static uint32_t          gStaleMs         = 0;
 static bool              gRunning = false;
 static uint32_t          gTimerHz;
 static SMPTE_Decoder     gLtcDecoder;
-static Hwi_Struct        gCaptureHwiStruct;
 static Clock_Struct      gWatchdogClockStruct;
+
+/* Hwi_Struct for timer interrupt handlers */
+static Hwi_Struct        wtimer0AHwiStruct;
+static Hwi_Struct        wtimer0BHwiStruct;
+static volatile uint32_t g_uiPeriod = 0;
+static volatile uint32_t g_uiHighCount = 0;
+static volatile uint32_t g_uiLowCount = 0;
 
 /*** Static Function Prototypes ***/
 
+static Void WTimer0AHwi(UArg arg);
+static Void WTimer0BHwi(UArg arg);
+
 static Void DecodeTaskFxn(UArg arg0, UArg arg1);
 static void watchdogClockFxn(UArg arg);
-static void timerCaptureHwi(UArg arg);
 
 static void SMPTE_LTC_parseFrame(SMPTE_Decoder *dec);
 static void SMPTE_LTC_parseFrameReverse(SMPTE_Decoder *dec);
@@ -152,56 +160,82 @@ extern uint32_t g_systemClock;
 
 void SMPTE_initDecoder(void)
 {
+    Error_Block eb;
+    Hwi_Params hwiParams;
+
     gTimerHz = SysCtlClockGet();
 
     SMPTE_LTC_init(&gLtcDecoder);
     gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
 
-    /* --- construct the capture interrupt handler --- */
-    Error_Block eb;
+    /* Create INT_WTIMER0 hardware interrupt handler */
     Error_init(&eb);
-    Hwi_Params hwiParams;
     Hwi_Params_init(&hwiParams);
-    //hwiParams.enableInt  = false;  /* stay masked until SMPTE_HW_start() */
-    //hwiParams.priority   = 0x40;   /* tune to your system's priority scheme */
-    Hwi_construct(&(gCaptureHwiStruct), INT_WTIMER0A, timerCaptureHwi, &hwiParams, &eb);
+    Hwi_construct(&(wtimer0AHwiStruct), INT_WTIMER0A, WTimer0AHwi, &hwiParams, &eb);
     if (Error_check(&eb))
         System_abort("Couldn't construct WTIMER0A error hwi");
+
+    /* Create INT_WTIMER0B hardware interrupt handler */
+    Error_init(&eb);
+    Hwi_Params_init(&hwiParams);
+    Hwi_construct(&(wtimer0BHwiStruct), INT_WTIMER0B, WTimer0BHwi, &hwiParams, &eb);
+    if (Error_check(&eb))
+        System_abort("Couldn't construct WTIMER0B error hwi");
 
     /* --- route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input --- */
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC));
-
     SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_WTIMER0));
 
     /* Disable global interrupts */
     IntMasterDisable();
 
-    /* Configure PC4 to WT0CCP0 timer input */
-    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
+    /* Configure PC4 to WT0CCP0 for timer input */
+    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5);
+
+    /* Configure the GPIO to be CCP pins for the Timer peripheral */
     GPIOPinConfigure(GPIO_PC4_WT0CCP0);
+    GPIOPinConfigure(GPIO_PC5_WT0CCP1);
+
+    /* Disable the timer before we change anything */
+    TimerDisable(WTIMER0_BASE, TIMER_BOTH);
 
     /* Capture on both rising and falling edges -- biphase-mark decode
      * needs the interval between every transition, not just one polarity
      * Configure WTIMER0, sub-timer A, as 32-bit edge-time capture,
      * up-counting
      */
-    TimerDisable(WTIMER0_BASE, TIMER_A);
-    TimerConfigure(WTIMER0_BASE, TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP);
+    TimerConfigure(WTIMER0_BASE, (TIMER_CFG_SPLIT_PAIR |
+                                  TIMER_CFG_A_PERIODIC | TIMER_CFG_A_CAP_TIME_UP |
+                                  TIMER_CFG_B_PERIODIC | TIMER_CFG_B_CAP_TIME_UP));
 
-    TimerLoadSet(WTIMER0_BASE, TIMER_A, 0xFFFFFFFFu);
+    /* To use the wide timer in edge time mode, it must be preloaded with initial
+     * values. If the prescaler is used, then it must be preloaded as well.
+     * Since we want to use all 48-bits for both timers it will be loaded with
+     * the maximum of 0xFFFFFFFF for the 32-bit wide split timers, and 0xFF to add
+     * the additional 8-bits to the split timers with the prescaler.
+     */
+    TimerLoadSet(WTIMER0_BASE, TIMER_BOTH, 0xFFFFFFFF);
     TimerPrescaleSet(WTIMER0_BASE, TIMER_BOTH, 0x00);
 
-    TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_BOTH_EDGES);
+    TimerControlEvent(WTIMER0_BASE, TIMER_A, TIMER_EVENT_POS_EDGE);
+    TimerControlEvent(WTIMER0_BASE, TIMER_B, TIMER_EVENT_NEG_EDGE);
 
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    /* Clear the interrupt status flag.  This is done to make sure the
+     * interrupt flag is cleared before we enable it.
+     */
+    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT|TIMER_CAPB_EVENT);
+
+    /* Enable the Timer A and B interrupts for Capture Events */
     TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    TimerIntEnable(WTIMER0_BASE, TIMER_CAPB_EVENT);
 
     /* timer left disabled here -- SMPTE_HW_start() enables it */
     /* Enable the interrupts for Timer A and Timer B on the processor (NVIC) */
     IntEnable(INT_WTIMER0A);
+    IntEnable(INT_WTIMER0B);
 
     /* Renable master interrtupts */
     IntMasterEnable();
@@ -257,6 +291,8 @@ int SMPTE_Decoder_Start(void)
 
         Clock_start(Clock_handle(&gWatchdogClockStruct));
 
+        g_bPostInterrupts = true;
+
         gRunning = true;
     }
 
@@ -273,8 +309,17 @@ int SMPTE_Decoder_Stop(void)
     {
         Clock_stop(Clock_handle(&gWatchdogClockStruct));
 
-        Hwi_disableInterrupt(INT_WTIMER0A);
-        TimerDisable(WTIMER0_BASE, TIMER_A);
+        /* Disable both Timer A and Timer B */
+        TimerDisable(WTIMER0_BASE, TIMER_BOTH);
+
+        IntDisable(INT_WTIMER0A);
+        IntDisable(INT_WTIMER0B);
+
+        /* Disable the Timer A and B interrupts for Capture Events */
+        TimerIntDisable(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
+
+        /* Clear any interrupts pending */
+        TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
 
         /* Status LED */
         GPIO_write(Board_STAT_LED, Board_LED_ON);
@@ -285,6 +330,8 @@ int SMPTE_Decoder_Stop(void)
         GPIO_write(Board_DIRECTION, PIN_LOW);
         GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
         GPIO_write(Board_BUSY_N, PIN_HIGH);
+
+        g_bPostInterrupts = false;
 
         gRunning = false;
     }
@@ -314,19 +361,45 @@ uint32_t SMPTE_HW_getTimerHz(void)
  * own scheduling latency doesn't touch the timestamp's accuracy.
  */
 
+#if 0
 static void timerCaptureHwi(UArg arg)
 {
     /* Clear the interrupt flag first */
     TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
-
     /* Read time at which interrupt occurred */
     uint32_t capturedTick = TimerValueGet(WTIMER0_BASE, TIMER_A);
-
     /* increment edge counter */
     gEdgeSeq++;
-
     /* process the capture tick state */
     SMPTE_LTC_onEdge(&gLtcDecoder, capturedTick);
+}
+#endif
+
+/* Rising Edge Interrupt (Start of Pulse) */
+Void WTimer0AHwi(UArg arg)
+{
+    /* Clear the timer interrupt */
+    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    /* Echo high pin change to SYNC pin */
+    GPIO_write(Board_FRAME_SYNC, PIN_HIGH);
+    /* Store the start time */
+    g_uiHighCount = TimerValueGet(WTIMER0_BASE, TIMER_A);
+    /* Call the edge change interrupt handler */
+    SMPTE_LTC_onEdge(&gLtcDecoder, g_uiHighCount);
+}
+
+/* Falling Edge Interrupt (End of Pulse) */
+Void WTimer0BHwi(UArg arg)
+{
+    /* Clear the timer interrupt */
+    TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
+    /* Echo low pin change to SYNC pin */
+    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
+    /* Store the end time */
+    g_uiLowCount = TimerValueGet(WTIMER0_BASE, TIMER_B);
+
+    /* Call the edge change interrupt handler */
+    SMPTE_LTC_onEdge(&gLtcDecoder, g_uiLowCount);
 }
 
 /*
@@ -637,6 +710,15 @@ void SMPTE_LTC_onTimeout(SMPTE_Decoder *dec)
 
 bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
 {
+    // Increment the edge counter
+    gEdgeSeq++;
+
+    /* Calculate the pulse period from rising edge to falling edge */
+    if (g_uiLowCount > g_uiHighCount)
+        g_uiPeriod = g_uiLowCount - g_uiHighCount;
+    else
+        g_uiPeriod = g_uiHighCount - g_uiLowCount;
+
     if (!dec->haveLastEdge)
     {
         dec->lastEdgeTick = nowTicks;
