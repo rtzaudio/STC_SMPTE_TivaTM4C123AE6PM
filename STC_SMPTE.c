@@ -113,9 +113,9 @@ uint32_t g_systemClock;
 /* External Data Items */
 extern SMPTETimecode g_timecode;
 extern SMPTETimecode g_txTime;
-extern bool g_encoderEnabled;
-extern bool g_decoderEnabled;
+
 extern bool g_bPostInterrupts;
+extern bool g_encoderEnabled;
 
 static bool SPI_transfer_sync(SPI_Handle handle, SPI_Transaction *transaction);
 
@@ -433,7 +433,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                     break;
                 }
 
-                if (g_decoderEnabled)
+                if (SMPTE_HW_isRunning())
                     uReply |= SMPTE_DECCTL_ENABLE;
 
                 if (g_bPostInterrupts)
@@ -508,7 +508,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 
             if (uRequest & SMPTE_F_READ)
             {
-                if (g_decoderEnabled)
+                if (SMPTE_HW_isRunning())
                     uReply |= SMPTE_DECCTL_ENABLE;
 
                 if (g_bPostInterrupts)

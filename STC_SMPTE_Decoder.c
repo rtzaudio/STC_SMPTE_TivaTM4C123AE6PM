@@ -117,7 +117,6 @@ SMPTETimecode g_timecode;
 
 bool g_bPostInterrupts;
 bool g_decoderEnabled;
-bool g_bPostInterrupts;
 
 /*** Static Data Items ***/
 
@@ -125,17 +124,18 @@ static volatile uint32_t gEdgeSeq         = 0;   /* bumped once per capture ISR 
 static uint32_t          gLastSeenEdgeSeq = 0;
 static uint32_t          gStaleMs         = 0;
 
-static bool              gRunning = false;
+static bool              g_decoderEnabled = false;
 static uint32_t          gTimerHz;
 static SMPTE_Decoder     gLtcDecoder;
 static Clock_Struct      gWatchdogClockStruct;
 
-/* Hwi_Struct for timer interrupt handlers */
-static Hwi_Struct        wtimer0AHwiStruct;
-static Hwi_Struct        wtimer0BHwiStruct;
+/* Data shared with interrupt handlers and tasks */
 static volatile uint32_t g_uiPeriod = 0;
 static volatile uint32_t g_uiHighCount = 0;
 static volatile uint32_t g_uiLowCount = 0;
+/* Hwi_Struct for timer interrupt handlers */
+static Hwi_Struct        wtimer0AHwiStruct;
+static Hwi_Struct        wtimer0BHwiStruct;
 
 /*** Static Function Prototypes ***/
 
@@ -182,7 +182,7 @@ void SMPTE_initDecoder(void)
     if (Error_check(&eb))
         System_abort("Couldn't construct WTIMER0B error hwi");
 
-    /* --- route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input --- */
+    /* Route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input */
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC));
@@ -262,7 +262,13 @@ void SMPTE_initDecoder(void)
 
 Void SMPTE_Decoder_Reset(void)
 {
+    SMPTE_LTC_init(&gLtcDecoder);
 
+    gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
+
+    gEdgeSeq         = 0;
+    gLastSeenEdgeSeq = 0;
+    gStaleMs         = 0;
 }
 
 //*****************************************************************************
@@ -271,7 +277,7 @@ Void SMPTE_Decoder_Reset(void)
 
 int SMPTE_Decoder_Start(void)
 {
-    if (!gRunning)
+    if (!g_decoderEnabled)
     {
         SMPTE_LTC_init(&gLtcDecoder);
 
@@ -294,7 +300,7 @@ int SMPTE_Decoder_Start(void)
 
         g_bPostInterrupts = true;
 
-        gRunning = true;
+        g_decoderEnabled = true;
     }
 
     return 0;
@@ -306,7 +312,7 @@ int SMPTE_Decoder_Start(void)
 
 int SMPTE_Decoder_Stop(void)
 {
-    if (gRunning)
+    if (g_decoderEnabled)
     {
         Clock_stop(Clock_handle(&gWatchdogClockStruct));
 
@@ -334,7 +340,7 @@ int SMPTE_Decoder_Stop(void)
 
         g_bPostInterrupts = false;
 
-        gRunning = false;
+        g_decoderEnabled = false;
     }
 
     return 1;
@@ -347,7 +353,7 @@ SMPTE_Decoder *SMPTE_HW_getDecoder(void)
 
 bool SMPTE_HW_isRunning(void)
 {
-    return gRunning;
+    return g_decoderEnabled;
 }
 
 uint32_t SMPTE_HW_getTimerHz(void)
@@ -355,25 +361,11 @@ uint32_t SMPTE_HW_getTimerHz(void)
     return gTimerHz;
 }
 
-/* WTIMER0A capture interrupt. Runs in Hwi context. The edge time itself
+/* WTIMER0 edge capture interrupt, runs in Hwi context. The actual edge time
  * was already latched by hardware the instant the pin transitioned; all
  * this ISR does is clear the flag and read the latched value out, so its
  * own scheduling latency doesn't touch the timestamp's accuracy.
  */
-
-#if 0
-static void timerCaptureHwi(UArg arg)
-{
-    /* Clear the interrupt flag first */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
-    /* Read time at which interrupt occurred */
-    uint32_t capturedTick = TimerValueGet(WTIMER0_BASE, TIMER_A);
-    /* increment edge counter */
-    gEdgeSeq++;
-    /* process the capture tick state */
-    SMPTE_LTC_onEdge(&gLtcDecoder, capturedTick);
-}
-#endif
 
 /* Rising Edge Interrupt (Start of Pulse) */
 Void WTimer0AHwi(UArg arg)
@@ -410,7 +402,7 @@ Void WTimer0BHwi(UArg arg)
 
 static void watchdogClockFxn(UArg arg)
 {
-    if (!gRunning) {
+    if (!g_decoderEnabled) {
         return;
     }
 
@@ -449,6 +441,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
     uint32_t key;
     uint32_t lastBadSyncCount = 0;
     SMPTE_Timecode local;
+
     SMPTE_Decoder *dec = SMPTE_HW_getDecoder();
 
     /* Initialize and start edge decode interrupts */
@@ -472,7 +465,8 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
                           local.dropFrame ? " DF" : "",
                           local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
 
-            /* Now extract any time and other data from the packet */
+            /* Now extract time data from the packet */
+
             key = GateMutex_enter(gateMutex0);
             g_timecode.frame = (uint8_t)local.frames;
             g_timecode.secs  = (uint8_t)local.seconds;
@@ -521,42 +515,6 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
         Task_sleep(5);
     }
 }
-
-
-#if 0
-    /*
-     * Loop waiting for SMPTE word packets to arrive
-     */
-
-    while (true)
-    {
-        /* Wait for an 80-bit timecode word */
-        //if (!Mailbox_pend(mailboxWord, &word, 100))
-        {
-            //GPIO_write(Board_STAT_LED, Board_LED_ON);
-            //continue;
-        }
-
-        /* Toggle the LED on each packet received */
-        GPIO_toggle(Board_STAT_LED);
-
-        /* Now extract any time and other data from the packet */
-        key = GateMutex_enter(gateMutex0);
-        //g_timecode.frame = (uint8_t)(word.ltc.frame_units + (word.ltc.frame_tens * 10));
-        //g_timecode.secs  = (uint8_t)(word.ltc.secs_units  + (word.ltc.secs_tens  * 10));
-        //g_timecode.mins  = (uint8_t)(word.ltc.mins_units  + (word.ltc.mins_tens  * 10));
-        //g_timecode.hours = (uint8_t)(word.ltc.hours_units + (word.ltc.hours_tens * 10));
-        GateMutex_leave(gateMutex0, key);
-
-        Task_sleep(1000);
-
-        /* Assert the interrupt line to notify host packet is ready  */
-        if (g_bPostInterrupts)
-        {
-            //GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
-        }
-    }
-#endif
 
 /* Initialize the decoder */
 
@@ -825,7 +783,7 @@ bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
         }
 
         dec->avgHalfBitTicks = (uint32_t)((int32_t)dec->avgHalfBitTicks +
-                                (((int32_t)delta - (int32_t)dec->avgHalfBitTicks) / 8));
+                               (((int32_t)delta - (int32_t)dec->avgHalfBitTicks) / 8));
     }
 
     if (!bitReady) {

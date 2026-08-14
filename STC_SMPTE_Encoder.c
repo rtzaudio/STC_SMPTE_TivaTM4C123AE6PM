@@ -90,7 +90,7 @@
 #define FRAME_GETBIT(framebuf, bitnum)    ( (((framebuf[bitnum >> 3]) >> (bitnum % 8)) & 0x01) )
 
 /* SMPTE Encoder variables */
-volatile bool     g_encoderEnabled = false;
+bool  g_encoderEnabled = false;
 volatile uint8_t  g_txBitState = 0;
 volatile uint8_t  g_txHalfBit = 0;
 volatile uint32_t g_txBitCount = 0;
