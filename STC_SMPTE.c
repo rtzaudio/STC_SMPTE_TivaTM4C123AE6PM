@@ -114,8 +114,8 @@ uint32_t g_systemClock;
 extern SMPTETimecode g_timecode;
 extern SMPTETimecode g_txTime;
 
-extern bool g_bPostInterrupts;
-extern bool g_encoderEnabled;
+extern volatile bool g_bPostInterrupts;
+extern volatile bool g_encoderEnabled;
 
 static bool SPI_transfer_sync(SPI_Handle handle, SPI_Transaction *transaction);
 
@@ -139,23 +139,8 @@ Int main()
     Board_initGPIO();
     Board_initSPI();
 
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
-    GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
-    GPIO_write(Board_SMPTE_OUT, PIN_HIGH);
-    GPIO_write(Board_BUSY_N, PIN_HIGH);
-
-    /* WTIMER1 - SMPTE output generator
-     * WTIMER0 - SMPTE input (64-bit timer option pins PC4 & PC5)
-     */
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOG);
-
-    /* Now start the main application button polling task */
-
+    /* Now start the main SPI slave task */
     Error_init(&eb);
-
     Task_Params_init(&taskParams);
     taskParams.stackSize = 2948;
     taskParams.priority  = 10;
@@ -181,8 +166,10 @@ bool SPI_transfer_sync(SPI_Handle handle, SPI_Transaction *transaction)
 
     /* Set BUSY pin low to indicate we're busy */
     GPIO_write(Board_BUSY_N, PIN_LOW);
+
     /* Send the SPI transaction */
     success = SPI_transfer(handle, transaction);
+
     /* Set BUSY back high to indicate not busy status */
     GPIO_write(Board_BUSY_N, PIN_HIGH);
 
@@ -210,6 +197,10 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     SPI_Handle hSlave;
     uint32_t key;
 
+    /* Initialize the encoder and decoder */
+    SMPTE_initEncoder();
+    SMPTE_initDecoder();
+
     /* Read system parameters from EEPROM */
     //SysParamsRead(&g_cfg);
     InitSysDefaults(&g_cfg);
@@ -229,10 +220,6 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 
     if (hSlave == NULL)
         System_abort("Error initializing SPI0\n");
-
-    /* Initialize the encoder and decoder */
-    SMPTE_initEncoder();
-    SMPTE_initDecoder();
 
     /*
      * Enter the main SPI slave processing loop
@@ -540,9 +527,11 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
                     uReply |= SMPTE_DECCTL_INT;
 
                 key = GateMutex_enter(gateMutex0);
+
                 uiData[0] = uReply;
                 uiData[1] = (((uint16_t)g_timecode.secs  << 8) | ((uint16_t)g_timecode.frame & 0xFF));
                 uiData[2] = (((uint16_t)g_timecode.hours << 8) | ((uint16_t)g_timecode.mins  & 0xFF));
+
                 GateMutex_leave(gateMutex0, key);
 
                 /* Send the 48-bit reply word back */

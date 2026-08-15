@@ -131,14 +131,22 @@ void STC_SMPTE_initDMA(void)
  */
 void STC_SMPTE_initGeneral(void)
 {
+    /* Enable general purpose I/O peripherals */
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOG);
 
-	// Initialize the EEPROM so we can access it later
+    /* WTIMER1 - SMPTE output generator
+     * WTIMER0 - SMPTE input (64-bit timer option pins PC4 & PC5)
+     */
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER1);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
 
+	/* Enable the EEPROM peripheral so we can access it */
     SysCtlPeripheralEnable(SYSCTL_PERIPH_EEPROM0);
 
     if (EEPROMInit() != EEPROM_INIT_OK)
@@ -180,11 +188,11 @@ GPIO_PinConfig gpioPinConfigs[] = {
     /* (2) STC_SMPTE_INT_N */
     GPIOTiva_PA_6 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
     /* (3) STC_SMPTE_OUT */
-    GPIOTiva_PB_6 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW,
+    GPIOTiva_PB_6 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
     /* (4) STC_SMPTE_MUTE */
     GPIOTiva_PB_7 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW,
     /* (5) STC_SMPTE_STAT_LED */
-    GPIOTiva_PC_7 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW,
+    GPIOTiva_PC_7 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
     /* (6) STC_SMPTE_SLOWCODE */
     GPIOTiva_PE_0 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW,
     /* (7) STC_SMPTE_FRAMESYNC */

@@ -115,16 +115,16 @@
 
 SMPTETimecode g_timecode;
 
-bool g_bPostInterrupts;
-bool g_decoderEnabled;
+bool volatile g_bPostInterrupts;
+bool volatile g_decoderEnabled;
 
 /*** Static Data Items ***/
 
 static volatile uint32_t gEdgeSeq         = 0;   /* bumped once per capture ISR */
 static uint32_t          gLastSeenEdgeSeq = 0;
 static uint32_t          gStaleMs         = 0;
-
 static uint32_t          gTimerHz;
+
 static Clock_Struct      gWatchdogClockStruct;
 static SMPTE_Decoder     gLtcDecoder;
 
@@ -132,9 +132,10 @@ static SMPTE_Decoder     gLtcDecoder;
 static volatile uint32_t g_uiPeriod = 0;
 static volatile uint32_t g_uiHighCount = 0;
 static volatile uint32_t g_uiLowCount = 0;
+
 /* Hwi_Struct for timer interrupt handlers */
-static Hwi_Struct        wtimer0AHwiStruct;
-static Hwi_Struct        wtimer0BHwiStruct;
+static Hwi_Struct wtimer0AHwiStruct;
+static Hwi_Struct wtimer0BHwiStruct;
 
 /*** Static Function Prototypes ***/
 
@@ -164,29 +165,38 @@ void SMPTE_initDecoder(void)
 
     gTimerHz = SysCtlClockGet();
 
+    /* Set I/O control lines to initial state */
+    GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
+    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
+    GPIO_write(Board_DIRECTION, PIN_LOW);
+    GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+    GPIO_write(Board_BUSY_N, PIN_HIGH);
+
     SMPTE_LTC_init(&gLtcDecoder);
     gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
 
-    /* Create INT_WTIMER0 hardware interrupt handler */
+    /* Create INT_WTIMER0 rising interrupt handler */
     Error_init(&eb);
     Hwi_Params_init(&hwiParams);
     Hwi_construct(&(wtimer0AHwiStruct), INT_WTIMER0A, WTimer0AHwi, &hwiParams, &eb);
     if (Error_check(&eb))
         System_abort("Couldn't construct WTIMER0A error hwi");
 
-    /* Create INT_WTIMER0B hardware interrupt handler */
+    /* Create INT_WTIMER0B falling edge interrupt handler */
     Error_init(&eb);
     Hwi_Params_init(&hwiParams);
     Hwi_construct(&(wtimer0BHwiStruct), INT_WTIMER0B, WTimer0BHwi, &hwiParams, &eb);
     if (Error_check(&eb))
         System_abort("Couldn't construct WTIMER0B error hwi");
 
-    /* Route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input */
+    /* --- construct (but do not yet start) the signal-loss watchdog --- */
+    Clock_Params clockParams;
+    Clock_Params_init(&clockParams);
+    clockParams.period    = SMPTE_WATCHDOG_PERIOD_MS;   /* assumes default 1ms Clock tick */
+    clockParams.startFlag = false;
+    Clock_construct(&gWatchdogClockStruct, watchdogClockFxn, SMPTE_WATCHDOG_PERIOD_MS, &clockParams);
 
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC));
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
-    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_WTIMER0));
+    /* --- Route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input --- */
 
     /* Disable global interrupts */
     IntMasterDisable();
@@ -239,13 +249,6 @@ void SMPTE_initDecoder(void)
     /* Renable master interrtupts */
     IntMasterEnable();
 
-    /* --- construct (but do not yet start) the signal-loss watchdog --- */
-    Clock_Params clockParams;
-    Clock_Params_init(&clockParams);
-    clockParams.period    = SMPTE_WATCHDOG_PERIOD_MS;   /* assumes default 1ms Clock tick */
-    clockParams.startFlag = false;
-    Clock_construct(&gWatchdogClockStruct, watchdogClockFxn, SMPTE_WATCHDOG_PERIOD_MS, &clockParams);
-
     /* Create the SMPTE packet decoder task */
     Task_Params taskParams;
     Task_Params_init(&taskParams);
@@ -278,6 +281,12 @@ int SMPTE_Decoder_Start(void)
 {
     if (!g_decoderEnabled)
     {
+        GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
+        GPIO_write(Board_FRAME_SYNC, PIN_LOW);
+        GPIO_write(Board_DIRECTION, PIN_LOW);
+        GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
+        GPIO_write(Board_BUSY_N, PIN_HIGH);
+
         SMPTE_LTC_init(&gLtcDecoder);
 
         gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
@@ -287,7 +296,6 @@ int SMPTE_Decoder_Start(void)
         gStaleMs         = 0;
 
         TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
-
         TimerEnable(WTIMER0_BASE, TIMER_BOTH);
         TimerIntEnable(WTIMER0_BASE, TIMER_CAPA_EVENT|TIMER_CAPB_EVENT);
 

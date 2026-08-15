@@ -224,11 +224,11 @@ int SMPTE_Encoder_Stop(void)
     if (!g_encoderEnabled)
         return 0;
 
-    /* Disable TIMER1A */
+    /* Disable WTIMER1A */
     TimerDisable(WTIMER1_BASE, TIMER_A);
-    /* Disable the TIMER1A interrupt */
+    /* Disable the WTIMER1A interrupt */
     IntDisable(INT_WTIMER1A);
-    /* Turn off TIMER1B interrupt */
+    /* Turn off WTIMER1B interrupt */
     TimerIntDisable(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
     /* Clear any pending interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);
