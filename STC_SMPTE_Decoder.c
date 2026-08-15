@@ -439,7 +439,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
     bool wasTimedOut = false;
     uint32_t key;
     uint32_t lastBadSyncCount = 0;
-    SMPTE_DecoderTimecode local;
+    SMPTE_Decoder_Timecode local;
 
     SMPTE_Decoder *dec = SMPTE_HW_getDecoder();
 
@@ -613,7 +613,7 @@ enum {
     /* bits 64-79 = sync word, checked directly in SMPTE_LTC_onEdge() */
 };
 
-static void parseCommon(SMPTE_DecoderTimecode *tc, BitGetter get, const uint8_t *buf)
+static void parseCommon(SMPTE_Decoder_Timecode *tc, BitGetter get, const uint8_t *buf)
 {
     tc->frames  = (uint8_t)(getField(get, buf, BIT_FRAME_TENS, 2) * 10u +
                              getField(get, buf, BIT_FRAME_UNITS, 4));

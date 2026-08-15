@@ -99,7 +99,7 @@ typedef struct {
     uint8_t  userBits[8];      /* 8 x 4-bit user-bit nibbles, raw */
     uint32_t frameCount;       /* running count of decoded frames, for rate/health checks */
     SMPTE_Direction direction; /* direction this specific frame was decoded in */
-} SMPTE_DecoderTimecode;
+} SMPTE_Decoder_Timecode;
 
 /* Opaque-ish decoder state -- allocate one instance per LTC input channel. */
 
@@ -137,7 +137,7 @@ typedef struct {
     uint32_t bitsSinceSync;         /* bits accepted since the last confirmed forward sync, for a
                                      * frame-length sanity check (a genuine frame is always 80 bits) */
     /* decoded output */
-    SMPTE_DecoderTimecode tc;
+    SMPTE_Decoder_Timecode tc;
     volatile bool  frameReady;      /* set in ISR context when a new frame has been parsed */
 
     /* health / diagnostics */
@@ -206,15 +206,15 @@ typedef struct _LTCFrameQueue {
  */
 
 typedef struct _SYSCFG {
-	uint32_t magic;
-	uint32_t version;
-	uint32_t build;
+	uint32_t    magic;
+	uint32_t    version;
+	uint32_t    build;
     /*** GLOBAL PARAMETERS ***/
-	uint32_t debug;
-    uint32_t sysflags;
-    char    timezone[6];
-    int32_t frame_rate;
-    bool    drop_frame;
+	uint32_t    debug;
+    uint32_t    sysflags;
+    char        timezone[6];
+    int32_t     frame_rate;
+    bool        drop_frame;
 } SYSCFG;
 
 /*** Function Prototypes ***************************************************/
@@ -239,7 +239,6 @@ void SMPTE_Decoder_Reset(void);
 SMPTE_Decoder *SMPTE_HW_getDecoder(void);
 uint32_t SMPTE_HW_getTimerHz(void);
 bool SMPTE_HW_isRunning(void);
-
 
 #ifdef __cplusplus
 }
