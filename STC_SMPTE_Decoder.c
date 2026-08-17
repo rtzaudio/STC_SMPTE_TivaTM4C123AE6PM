@@ -129,7 +129,7 @@ static Clock_Struct      gWatchdogClockStruct;
 static SMPTE_Decoder     gLtcDecoder;
 
 /* Data shared with interrupt handlers and tasks */
-static volatile uint32_t g_uiPeriod = 0;
+//static volatile uint32_t g_uiPeriod = 0;
 static volatile uint32_t g_uiHighCount = 0;
 static volatile uint32_t g_uiLowCount = 0;
 
@@ -178,6 +178,9 @@ void SMPTE_initDecoder(void)
     /* Create INT_WTIMER0 rising interrupt handler */
     Error_init(&eb);
     Hwi_Params_init(&hwiParams);
+    /* Set Port A interrupt to Priority 2 (0x40) */
+    hwiParams.priority  = 0x40;
+    hwiParams.enableInt = true;
     Hwi_construct(&(wtimer0AHwiStruct), INT_WTIMER0A, WTimer0AHwi, &hwiParams, &eb);
     if (Error_check(&eb))
         System_abort("Couldn't construct WTIMER0A error hwi");
@@ -185,6 +188,9 @@ void SMPTE_initDecoder(void)
     /* Create INT_WTIMER0B falling edge interrupt handler */
     Error_init(&eb);
     Hwi_Params_init(&hwiParams);
+    /* Set Port A interrupt to Priority 2 (0x40) */
+    hwiParams.priority  = 0x40;
+    hwiParams.enableInt = true;
     Hwi_construct(&(wtimer0BHwiStruct), INT_WTIMER0B, WTimer0BHwi, &hwiParams, &eb);
     if (Error_check(&eb))
         System_abort("Couldn't construct WTIMER0B error hwi");
@@ -681,9 +687,11 @@ static void resetLock(SMPTE_Decoder *dec)
 
 void SMPTE_LTC_onTimeout(SMPTE_Decoder *dec)
 {
+    UInt key = Hwi_disable();
     resetLock(dec);
     dec->timedOut = true;
     dec->timeoutCount++;
+    Hwi_restore(key);
 }
 
 bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
@@ -692,10 +700,10 @@ bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
     gEdgeSeq++;
 
     /* Calculate the pulse period from rising edge to falling edge */
-    if (g_uiLowCount > g_uiHighCount)
-        g_uiPeriod = g_uiLowCount - g_uiHighCount;
-    else
-        g_uiPeriod = g_uiHighCount - g_uiLowCount;
+    //if (g_uiLowCount > g_uiHighCount)
+    //    g_uiPeriod = g_uiLowCount - g_uiHighCount;
+    //else
+    //    g_uiPeriod = g_uiHighCount - g_uiLowCount;
 
     if (!dec->haveLastEdge)
     {
