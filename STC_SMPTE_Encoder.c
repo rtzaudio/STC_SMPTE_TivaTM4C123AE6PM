@@ -89,8 +89,10 @@
 /* Returns the state of a bit number in the frame buffer */
 #define FRAME_GETBIT(framebuf, bitnum)    ( (((framebuf[bitnum >> 3]) >> (bitnum % 8)) & 0x01) )
 
-/* SMPTE Encoder variables */
-bool  g_encoderEnabled = false;
+/*** SMPTE Encoder variables ***/
+
+bool g_encoderEnabled = false;
+
 volatile uint8_t  g_txBitState = 0;
 volatile uint8_t  g_txHalfBit = 0;
 volatile uint32_t g_txBitCount = 0;
@@ -100,11 +102,13 @@ SMPTETimecode g_txTime;
 
 static LTCFrame g_txFrame;
 
-/* Global Config variables */
+/*** Global Config variables ***/
+
 extern SYSCFG g_cfg;
 extern uint32_t g_systemClock;
 
-/* Interrupt Handlers */
+/*** Interrupt Handlers ***/
+
 static Void WTimer1AIntHandler(UArg arg);
 
 //*****************************************************************************

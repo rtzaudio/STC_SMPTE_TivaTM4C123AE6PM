@@ -17,7 +17,7 @@
 /* SMPTE CONTROLLER SPI SLAVE REGISTERS
  *
  * All registers are 16-bits with the upper word containing the command
- * and flag bits. The lower 8-bits contains any associated data byte.
+ * and flag bits. The lower 8-bits contains any data or flags.
  *
  *   +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
  *   | R | A | A | A | C | C | C | C | B | B | B | B | B | B | B | B |
