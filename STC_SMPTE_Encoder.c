@@ -100,6 +100,8 @@ volatile uint32_t g_txFrameCount = 0;
 
 SMPTETimecode g_txTime;
 
+static Hwi_Struct wtimer1AHwiStruct;
+
 static LTCFrame g_txFrame;
 
 /*** Global Config variables ***/
@@ -117,13 +119,17 @@ static Void WTimer1AIntHandler(UArg arg);
 
 void SMPTE_initEncoder(void)
 {
-    /* Map the timer interrupt handlers. We don't make sys/bios calls
-     * from these interrupt handlers and there is no need to create a
-     * context handler with stack swapping for these. These handlers
-     * just update some globals variables and need to execute as
-     * quickly and efficiently as possible.
-     */
-    Hwi_plug(INT_WTIMER1A, WTimer1AIntHandler);
+    Error_Block eb;
+    Hwi_Params hwiParams;
+    /* Create INT_WTIMER1A rising interrupt handler */
+    Error_init(&eb);
+    Hwi_Params_init(&hwiParams);
+    hwiParams.priority  = 0x40;
+    hwiParams.enableInt = true;
+    Hwi_construct(&(wtimer1AHwiStruct), INT_WTIMER1A, 
+                    WTimer1AIntHandler, &hwiParams, &eb);
+    if (Error_check(&eb))
+        System_abort("Couldn't construct WTIMER0A error hwi");
 
     SMPTE_Encoder_Reset();
 }
@@ -281,7 +287,7 @@ Void WTimer1AIntHandler(UArg arg)
         if (g_txBitCount >= LTC_FRAME_BIT_COUNT)
         {
             /* If so, then increment the frame time */
-            ltc_frame_increment(&g_txFrame, g_cfg.frame_rate, LTC_TV_625_50, 0);
+            ltc_frame_increment(&g_txFrame, g_cfg.frame_rate, LTC_TV_525_60, 0);
 
             /* Increment frame counter */
             ++g_txFrameCount;
