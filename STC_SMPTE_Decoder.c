@@ -155,6 +155,25 @@ extern SYSCFG g_cfg;
 extern uint32_t g_systemClock;
 
 //*****************************************************************************
+// Decoder Helper Functions
+//*****************************************************************************
+
+SMPTE_Decoder *SMPTE_HW_getDecoder(void)
+{
+    return &g_LtcDecoder;
+}
+
+bool SMPTE_HW_isRunning(void)
+{
+    return g_decoderEnabled;
+}
+
+uint32_t SMPTE_HW_getTimerHz(void)
+{
+    return g_TimerHz;
+}
+
+//*****************************************************************************
 //********************** SMPTE DECODER SUPPORT ********************************
 //*****************************************************************************
 
@@ -357,21 +376,6 @@ int SMPTE_Decoder_Stop(void)
     }
 
     return 1;
-}
-
-SMPTE_Decoder *SMPTE_HW_getDecoder(void)
-{
-    return &g_LtcDecoder;
-}
-
-bool SMPTE_HW_isRunning(void)
-{
-    return g_decoderEnabled;
-}
-
-uint32_t SMPTE_HW_getTimerHz(void)
-{
-    return g_TimerHz;
 }
 
 /* WTIMER0 edge capture interrupt, runs in Hwi context. The actual edge time
@@ -696,7 +700,7 @@ void SMPTE_LTC_onTimeout(SMPTE_Decoder *dec)
 
 bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
 {
-    // Increment the edge counter
+    /* Increment the edge counter */
     g_EdgeSeq++;
 
     /* Calculate the pulse period from rising edge to falling edge */
