@@ -91,6 +91,8 @@
 
 /*** SMPTE Encoder variables ***/
 
+SMPTETimecode g_txTime;
+
 bool g_encoderEnabled = false;
 
 volatile uint8_t  g_txBitState = 0;
@@ -98,11 +100,8 @@ volatile uint8_t  g_txHalfBit = 0;
 volatile uint32_t g_txBitCount = 0;
 volatile uint32_t g_txFrameCount = 0;
 
-SMPTETimecode g_txTime;
-
-static Hwi_Struct wtimer1AHwiStruct;
-
 static LTCFrame g_txFrame;
+static Hwi_Struct wtimer1AHwiStruct;
 
 /*** Global Config variables ***/
 
@@ -164,7 +163,7 @@ int SMPTE_Encoder_Start(void)
     uint32_t clockrate;
 
     if (g_encoderEnabled)
-        return -1;
+        return 0;
 
     /* Set the starting time members in the SMPTE tx frame buffer */
     ltc_time_to_frame(&g_txFrame, &g_txTime, LTC_TV_525_60, 0);
@@ -222,7 +221,7 @@ int SMPTE_Encoder_Start(void)
     /* Enable TIMER1A */
     TimerEnable(WTIMER1_BASE, TIMER_A);
 
-    return 0;
+    return 1;
 }
 
 //*****************************************************************************

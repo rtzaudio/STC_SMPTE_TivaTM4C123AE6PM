@@ -113,10 +113,10 @@ uint32_t g_systemClock;
 /* External Data Items */
 extern SMPTETimecode g_timecode;
 extern SMPTETimecode g_txTime;
-
 extern volatile bool g_bPostInterrupts;
 extern volatile bool g_encoderEnabled;
 
+/* Static Function Prototypes */
 static bool SPI_transferSync(SPI_Handle handle, SPI_Transaction *transaction);
 
 //*****************************************************************************
@@ -204,6 +204,8 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
 
     for(;;)
     {
+        /* Read the first 16-bits with the command and flag bits */
+
         uReply = uRequest = uDummy = 0;
 
         transaction1.count = 1;
@@ -217,7 +219,6 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
         {
             /* Loop if error reading SPI! */
             System_printf("SPI slave rx failed\n");
-            System_flush();
             continue;
         }
 
@@ -258,11 +259,11 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
          *                 HOUR                             MINS
          */
 
-        /* Get the command portion bits */
+        /* Get the command portion bits from upper word */
         cmd = SMPTE_REG_GET(uRequest);
 
-        /* The lower 8-bits contains data/flags */
-        uData = uRequest & SMPTE_DATA_MASK;
+        /* The lower 8-bits contains any data/flags */
+        uData = SMPTE_DATA_GET(uRequest);
 
         /*
          * Handle the register command from the master

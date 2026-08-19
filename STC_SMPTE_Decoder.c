@@ -120,13 +120,13 @@ bool volatile g_decoderEnabled;
 
 /*** Static Data Items ***/
 
-static volatile uint32_t gEdgeSeq         = 0;   /* bumped once per capture ISR */
-static uint32_t          gLastSeenEdgeSeq = 0;
-static uint32_t          gStaleMs         = 0;
-static uint32_t          gTimerHz;
+static volatile uint32_t g_EdgeSeq         = 0;   /* bumped once per capture ISR */
+static uint32_t          g_LastSeenEdgeSeq = 0;
+static uint32_t          g_StaleMs         = 0;
+static uint32_t          g_TimerHz;
 
-static Clock_Struct      gWatchdogClockStruct;
-static SMPTE_Decoder     gLtcDecoder;
+static Clock_Struct      g_WatchdogClockStruct;
+static SMPTE_Decoder     g_LtcDecoder;
 
 /* Data shared with interrupt handlers and tasks */
 //static volatile uint32_t g_uiPeriod = 0;
@@ -163,7 +163,7 @@ void SMPTE_initDecoder(void)
     Error_Block eb;
     Hwi_Params hwiParams;
 
-    gTimerHz = SysCtlClockGet();
+    g_TimerHz = SysCtlClockGet();
 
     /* Set I/O control lines to initial state */
     GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
@@ -172,8 +172,8 @@ void SMPTE_initDecoder(void)
     GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
     GPIO_write(Board_BUSY_N, PIN_HIGH);
 
-    SMPTE_LTC_init(&gLtcDecoder);
-    gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
+    SMPTE_LTC_init(&g_LtcDecoder);
+    g_LtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
 
     /* Create INT_WTIMER0 rising interrupt handler */
     Error_init(&eb);
@@ -200,7 +200,7 @@ void SMPTE_initDecoder(void)
     Clock_Params_init(&clockParams);
     clockParams.period    = SMPTE_WATCHDOG_PERIOD_MS;   /* assumes default 1ms Clock tick */
     clockParams.startFlag = false;
-    Clock_construct(&gWatchdogClockStruct, watchdogClockFxn, SMPTE_WATCHDOG_PERIOD_MS, &clockParams);
+    Clock_construct(&g_WatchdogClockStruct, watchdogClockFxn, SMPTE_WATCHDOG_PERIOD_MS, &clockParams);
 
     /* --- Route the LTC input pin (PC4) to Wide Timer 0's CCP0 capture input --- */
 
@@ -270,13 +270,13 @@ void SMPTE_initDecoder(void)
 
 Void SMPTE_Decoder_Reset(void)
 {
-    SMPTE_LTC_init(&gLtcDecoder);
+    SMPTE_LTC_init(&g_LtcDecoder);
 
-    gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
+    g_LtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
 
-    gEdgeSeq         = 0;
-    gLastSeenEdgeSeq = 0;
-    gStaleMs         = 0;
+    g_EdgeSeq         = 0;
+    g_LastSeenEdgeSeq = 0;
+    g_StaleMs         = 0;
 }
 
 //*****************************************************************************
@@ -293,13 +293,13 @@ int SMPTE_Decoder_Start(void)
         GPIO_write(Board_SMPTE_INT_N, PIN_HIGH);
         GPIO_write(Board_BUSY_N, PIN_HIGH);
 
-        SMPTE_LTC_init(&gLtcDecoder);
+        SMPTE_LTC_init(&g_LtcDecoder);
 
-        gLtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
+        g_LtcDecoder.tickMask = SMPTE_CAPTURE_TICK_MASK;
 
-        gEdgeSeq         = 0;
-        gLastSeenEdgeSeq = 0;
-        gStaleMs         = 0;
+        g_EdgeSeq         = 0;
+        g_LastSeenEdgeSeq = 0;
+        g_StaleMs         = 0;
 
         TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
         TimerEnable(WTIMER0_BASE, TIMER_BOTH);
@@ -309,7 +309,7 @@ int SMPTE_Decoder_Start(void)
         IntEnable(INT_WTIMER0A);
         IntEnable(INT_WTIMER0B);
 
-        Clock_start(Clock_handle(&gWatchdogClockStruct));
+        Clock_start(Clock_handle(&g_WatchdogClockStruct));
 
         g_bPostInterrupts = true;
 
@@ -327,7 +327,7 @@ int SMPTE_Decoder_Stop(void)
 {
     if (g_decoderEnabled)
     {
-        Clock_stop(Clock_handle(&gWatchdogClockStruct));
+        Clock_stop(Clock_handle(&g_WatchdogClockStruct));
 
         /* Disable both Timer A and Timer B */
         TimerDisable(WTIMER0_BASE, TIMER_BOTH);
@@ -361,7 +361,7 @@ int SMPTE_Decoder_Stop(void)
 
 SMPTE_Decoder *SMPTE_HW_getDecoder(void)
 {
-    return &gLtcDecoder;
+    return &g_LtcDecoder;
 }
 
 bool SMPTE_HW_isRunning(void)
@@ -371,7 +371,7 @@ bool SMPTE_HW_isRunning(void)
 
 uint32_t SMPTE_HW_getTimerHz(void)
 {
-    return gTimerHz;
+    return g_TimerHz;
 }
 
 /* WTIMER0 edge capture interrupt, runs in Hwi context. The actual edge time
@@ -390,7 +390,7 @@ Void WTimer0AHwi(UArg arg)
     /* Store the start time */
     g_uiHighCount = TimerValueGet(WTIMER0_BASE, TIMER_A);
     /* Call the edge change interrupt handler */
-    SMPTE_LTC_onEdge(&gLtcDecoder, g_uiHighCount);
+    SMPTE_LTC_onEdge(&g_LtcDecoder, g_uiHighCount);
 }
 
 /* Falling Edge Interrupt (End of Pulse) */
@@ -403,12 +403,12 @@ Void WTimer0BHwi(UArg arg)
     /* Store the end time */
     g_uiLowCount = TimerValueGet(WTIMER0_BASE, TIMER_B);
     /* Call the edge change interrupt handler */
-    SMPTE_LTC_onEdge(&gLtcDecoder, g_uiLowCount);
+    SMPTE_LTC_onEdge(&g_LtcDecoder, g_uiLowCount);
 }
 
 /*
  * Runs periodically in Swi context (TI-RTOS Clock functions run at Swi
- * level). Purely counts elapsed watchdog periods since gEdgeSeq last
+ * level). Purely counts elapsed watchdog periods since g_EdgeSeq last
  * changed -- deliberately independent of the capture timer itself, per
  * the note in the file header.
  */
@@ -419,23 +419,23 @@ static void watchdogClockFxn(UArg arg)
         return;
     }
 
-    if (gEdgeSeq == gLastSeenEdgeSeq)
+    if (g_EdgeSeq == g_LastSeenEdgeSeq)
     {
-        if (gStaleMs < SMPTE_WATCHDOG_TIMEOUT_MS)
+        if (g_StaleMs < SMPTE_WATCHDOG_TIMEOUT_MS)
         {
-            gStaleMs += SMPTE_WATCHDOG_PERIOD_MS;
+            g_StaleMs += SMPTE_WATCHDOG_PERIOD_MS;
 
-            if (gStaleMs >= SMPTE_WATCHDOG_TIMEOUT_MS)
+            if (g_StaleMs >= SMPTE_WATCHDOG_TIMEOUT_MS)
             {
                 /* fires once per stall event */
-                SMPTE_LTC_onTimeout(&gLtcDecoder);
+                SMPTE_LTC_onTimeout(&g_LtcDecoder);
             }
         }
     }
     else
     {
-        gLastSeenEdgeSeq = gEdgeSeq;
-        gStaleMs         = 0;
+        g_LastSeenEdgeSeq = g_EdgeSeq;
+        g_StaleMs         = 0;
     }
 }
 
@@ -697,7 +697,7 @@ void SMPTE_LTC_onTimeout(SMPTE_Decoder *dec)
 bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
 {
     // Increment the edge counter
-    gEdgeSeq++;
+    g_EdgeSeq++;
 
     /* Calculate the pulse period from rising edge to falling edge */
     //if (g_uiLowCount > g_uiHighCount)
