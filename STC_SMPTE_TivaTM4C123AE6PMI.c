@@ -468,8 +468,6 @@ const UART_Config UART_config[] = {
 void STC_SMPTE_initUART(void)
 {
     SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_UART1);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_UART5);
 
     /*
      * Enable and configure UART0
@@ -478,31 +476,6 @@ void STC_SMPTE_initUART(void)
     GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0);
     GPIOPinConfigure(GPIO_PA1_U0TX);
     GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_1);
-
-    /*
-     * Enable and configure UART1
-     */
-    // Enable pin PF0 for UART1 U1RTS
-    // First open the lock and select the bits we want to modify in the GPIO commit register.
-    HWREG(GPIO_PORTF_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY;
-    HWREG(GPIO_PORTF_BASE + GPIO_O_CR) = 0x1;
-    // Now modify the configuration of the pins that we unlocked.
-    GPIOPinConfigure(GPIO_PF0_U1RTS);
-    GPIOPinTypeUART(GPIO_PORTF_BASE, GPIO_PIN_0);
-    GPIOPinConfigure(GPIO_PC5_U1TX);
-    GPIOPinTypeUART(GPIO_PORTC_BASE, GPIO_PIN_5);
-    GPIOPinConfigure(GPIO_PF1_U1CTS);
-    GPIOPinTypeUART(GPIO_PORTF_BASE, GPIO_PIN_1);
-    GPIOPinConfigure(GPIO_PC4_U1RX);
-    GPIOPinTypeUART(GPIO_PORTC_BASE, GPIO_PIN_4);
-
-    /*
-     * Enable and configure UART5
-     */
-    GPIOPinConfigure(GPIO_PE5_U5TX);
-    GPIOPinTypeUART(GPIO_PORTE_BASE, GPIO_PIN_5);
-    GPIOPinConfigure(GPIO_PE4_U5RX);
-    GPIOPinTypeUART(GPIO_PORTE_BASE, GPIO_PIN_4);
 
     /* Initialize the UART driver */
 #if TI_DRIVERS_UART_DMA

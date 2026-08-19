@@ -570,7 +570,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             }
             else
             {
-                if (uData <= 60)
+                if (uData < 60)
                 {
                     g_txTime.mins = (uint8_t)uData;
                 }
@@ -598,7 +598,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
             }
             else
             {
-                if (uData <= 60)
+                if (uData < 60)
                 {
                     g_txTime.secs = (uint8_t)uData;
                 }
