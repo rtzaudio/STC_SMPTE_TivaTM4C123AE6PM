@@ -84,7 +84,7 @@
 /* XDCtools Header files */
 #include "Board.h"
 #include "STC_SMPTE.h"
-#include "STC_SMPTE_SPI.h"
+#include "STC_SMPTE_Encoder.h"
 
 /* Returns the state of a bit number in the frame buffer */
 #define FRAME_GETBIT(framebuf, bitnum)    ( (((framebuf[bitnum >> 3]) >> (bitnum % 8)) & 0x01) )

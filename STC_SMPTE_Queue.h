@@ -55,13 +55,15 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "libltc/ltc.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /*** LTCFrame Queue Elements ***********************************************/
 
-#define LTC_FRAME_QUEUE_SIZE    10
+#define LTC_FRAME_QUEUE_SIZE    8
 
 typedef struct _LTCFrameQueueElement {
     Queue_Elem  elem;
@@ -80,7 +82,9 @@ typedef struct _LTCFrameQueue {
 
 /*** IPC FUNCTION PROTOTYPES ***********************************************/
 
-
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SMPTE_QUEUE_H */
 

@@ -184,7 +184,8 @@ Bool LTCQueue_pend(LTCFrameQueue *queue, LTCFrame* frame, UInt32 timeout)
         Hwi_restore(key);
 
         /* return message data */
-        memcpy(frame, &(elem->frame), sizeof(LTCFrameQueueElement));
+        //memcpy(frame, &(elem->frame), sizeof(LTCFrameQueueElement));
+        *frame = elem->frame;
 
         /* post the semaphore */
         Semaphore_post(queue->free_semaphore);
@@ -217,7 +218,8 @@ Bool LTCQueue_pend(LTCFrameQueue *queue, LTCFrame* frame, UInt32 timeout)
          /* re-enable ints */
          Hwi_restore(key);
 
-         memcpy(&(elem->frame), frame, sizeof(LTCFrameQueueElement));
+         //memcpy(&(elem->frame), frame, sizeof(LTCFrameQueueElement));
+         elem->frame = *frame;
 
          /* Add message to end of queue */
          Queue_put(queue->data_queue, (Queue_Elem *)elem);

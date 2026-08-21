@@ -103,6 +103,8 @@
 #include "Board.h"
 #include "STC_SMPTE.h"
 #include "STC_SMPTE_SPI.h"
+#include "STC_SMPTE_Decoder.h"
+#include "STC_SMPTE_Encoder.h"
 
 /* Constants and Macros */
 

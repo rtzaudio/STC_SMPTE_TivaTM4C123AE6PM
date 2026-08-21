@@ -86,6 +86,7 @@
 /* XDCtools Header files */
 #include "Board.h"
 #include "STC_SMPTE.h"
+#include "STC_SMPTE_Decoder.h"
 
 /* Ignore intervals shorter than this -- electrical glitch / contact bounce
  * on the comparator output, not a real LTC transition. Tune to your timer
@@ -473,14 +474,14 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
             dec->frameReady = false;
             Hwi_restore(key);
 
+            //System_printf("%02u:%02u:%02u:%02u%s [%s]\n",
+            //              local.hours, local.minutes,
+            //              local.seconds, local.frames,
+            //              local.dropFrame ? " DF" : "",
+            //              local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
+
             /* Toggle the LED on each packet received */
             GPIO_toggle(Board_STAT_LED);
-
-            System_printf("%02u:%02u:%02u:%02u%s [%s]\n",
-                          local.hours, local.minutes,
-                          local.seconds, local.frames,
-                          local.dropFrame ? " DF" : "",
-                          local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
 
             /* Now extract time data from the packet */
 
