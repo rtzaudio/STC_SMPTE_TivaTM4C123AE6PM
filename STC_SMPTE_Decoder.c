@@ -379,161 +379,6 @@ int SMPTE_Decoder_Stop(void)
     return 1;
 }
 
-/* WTIMER0 edge capture interrupt, runs in Hwi context. The actual edge time
- * was already latched by hardware the instant the pin transitioned; all
- * this ISR does is clear the flag and read the latched value out, so its
- * own scheduling latency doesn't touch the timestamp's accuracy.
- */
-
-/* Rising Edge Interrupt (Start of Pulse) */
-Void WTimer0AHwi(UArg arg)
-{
-    /* Clear the timer interrupt */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
-    /* Echo high pin change to SYNC pin */
-    GPIO_write(Board_FRAME_SYNC, PIN_HIGH);
-    /* Store the start time */
-    g_uiHighCount = TimerValueGet(WTIMER0_BASE, TIMER_A);
-    /* Call the edge change interrupt handler */
-    SMPTE_LTC_onEdge(&g_LtcDecoder, g_uiHighCount);
-}
-
-/* Falling Edge Interrupt (End of Pulse) */
-Void WTimer0BHwi(UArg arg)
-{
-    /* Clear the timer interrupt */
-    TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
-    /* Echo low pin change to SYNC pin */
-    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
-    /* Store the end time */
-    g_uiLowCount = TimerValueGet(WTIMER0_BASE, TIMER_B);
-    /* Call the edge change interrupt handler */
-    SMPTE_LTC_onEdge(&g_LtcDecoder, g_uiLowCount);
-}
-
-/*
- * Runs periodically in Swi context (TI-RTOS Clock functions run at Swi
- * level). Purely counts elapsed watchdog periods since g_EdgeSeq last
- * changed -- deliberately independent of the capture timer itself, per
- * the note in the file header.
- */
-
-static void watchdogClockFxn(UArg arg)
-{
-    if (!g_decoderEnabled) {
-        return;
-    }
-
-    if (g_EdgeSeq == g_LastSeenEdgeSeq)
-    {
-        if (g_StaleMs < SMPTE_WATCHDOG_TIMEOUT_MS)
-        {
-            g_StaleMs += SMPTE_WATCHDOG_PERIOD_MS;
-
-            if (g_StaleMs >= SMPTE_WATCHDOG_TIMEOUT_MS)
-            {
-                /* fires once per stall event */
-                SMPTE_LTC_onTimeout(&g_LtcDecoder);
-            }
-        }
-    }
-    else
-    {
-        g_LastSeenEdgeSeq = g_EdgeSeq;
-        g_StaleMs         = 0;
-    }
-}
-
-//*****************************************************************************
-// This task decodes 80-bit SMPTE packets fed to it from the edge interrupt
-// handlers. Once a valid packet sync word is found in the stream, the 64-bit
-// word is passed to this task to extract and decode all the time and other
-// information to provide the main SPI host task with the time code
-// information needed via an SPI interrupt.
-//*****************************************************************************
-
-Void DecodeTaskFxn(UArg arg0, UArg arg1)
-{
-    bool wasSignalPresent = true;
-    bool wasTimedOut = false;
-    uint32_t key;
-    uint32_t lastBadSyncCount = 0;
-    SMPTE_Decoder_Timecode local;
-
-    SMPTE_Decoder *dec = SMPTE_HW_getDecoder();
-
-    /* Initialize and start edge decode interrupts */
-    SMPTE_Decoder_Start();
-
-    for (;;)
-    {
-        if (dec->frameReady)
-        {
-            key = Hwi_disable();
-            local = dec->tc;
-            dec->frameReady = false;
-            Hwi_restore(key);
-
-            //System_printf("%02u:%02u:%02u:%02u%s [%s]\n",
-            //              local.hours, local.minutes,
-            //              local.seconds, local.frames,
-            //              local.dropFrame ? " DF" : "",
-            //              local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
-
-            /* Toggle the LED on each packet received */
-            GPIO_toggle(Board_STAT_LED);
-
-            /* Now extract time data from the packet */
-
-            key = GateMutex_enter(gateMutex0);
-            g_timecode.frame = (uint8_t)local.frames;
-            g_timecode.secs  = (uint8_t)local.seconds;
-            g_timecode.mins  = (uint8_t)local.minutes;
-            g_timecode.hours = (uint8_t)local.hours;
-            GateMutex_leave(gateMutex0, key);
-
-            if (g_bPostInterrupts)
-            {
-                GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
-            }
-        }
-
-        if (dec->signalPresent != wasSignalPresent)
-        {
-            wasSignalPresent = dec->signalPresent;
-
-            if (!wasSignalPresent) {
-                System_printf("LTC: edges present but failing to classify\n");
-            }
-        }
-
-        if (dec->timedOut != wasTimedOut)
-        {
-            wasTimedOut = dec->timedOut;
-
-            if (wasTimedOut)
-            {
-                System_printf("LTC: signal lost -- no edges (timeout #%u)\n", dec->timeoutCount);
-            }
-            else
-            {
-                System_printf("LTC: signal recovered\n");
-            }
-        }
-
-        if (dec->badSyncCount != lastBadSyncCount)
-        {
-            lastBadSyncCount = dec->badSyncCount;
-            System_printf("LTC: framing anomaly (total: %u)\n", dec->badSyncCount);
-        }
-
-        /* Frames arrive every ~33-42ms depending on fps; 5ms poll gives
-         * comfortable margin without burning cycles.
-         */
-        Task_sleep(5);
-    }
-}
-
 /* Initialize the decoder */
 
 void SMPTE_LTC_init(SMPTE_Decoder *dec)
@@ -880,6 +725,161 @@ bool SMPTE_LTC_onEdge(SMPTE_Decoder *dec, uint32_t nowTicks)
     }
 
     return gotFrame;
+}
+
+/* WTIMER0 edge capture interrupt, runs in Hwi context. The actual edge time
+ * was already latched by hardware the instant the pin transitioned; all
+ * this ISR does is clear the flag and read the latched value out, so its
+ * own scheduling latency doesn't touch the timestamp's accuracy.
+ */
+
+/* Rising Edge Interrupt (Start of Pulse) */
+Void WTimer0AHwi(UArg arg)
+{
+    /* Clear the timer interrupt */
+    TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT);
+    /* Echo high pin change to SYNC pin */
+    GPIO_write(Board_FRAME_SYNC, PIN_HIGH);
+    /* Store the start time */
+    g_uiHighCount = TimerValueGet(WTIMER0_BASE, TIMER_A);
+    /* Call the edge change interrupt handler */
+    SMPTE_LTC_onEdge(&g_LtcDecoder, g_uiHighCount);
+}
+
+/* Falling Edge Interrupt (End of Pulse) */
+Void WTimer0BHwi(UArg arg)
+{
+    /* Clear the timer interrupt */
+    TimerIntClear(WTIMER0_BASE, TIMER_CAPB_EVENT);
+    /* Echo low pin change to SYNC pin */
+    GPIO_write(Board_FRAME_SYNC, PIN_LOW);
+    /* Store the end time */
+    g_uiLowCount = TimerValueGet(WTIMER0_BASE, TIMER_B);
+    /* Call the edge change interrupt handler */
+    SMPTE_LTC_onEdge(&g_LtcDecoder, g_uiLowCount);
+}
+
+/*
+ * Runs periodically in Swi context (TI-RTOS Clock functions run at Swi
+ * level). Purely counts elapsed watchdog periods since g_EdgeSeq last
+ * changed -- deliberately independent of the capture timer itself, per
+ * the note in the file header.
+ */
+
+static void watchdogClockFxn(UArg arg)
+{
+    if (!g_decoderEnabled) {
+        return;
+    }
+
+    if (g_EdgeSeq == g_LastSeenEdgeSeq)
+    {
+        if (g_StaleMs < SMPTE_WATCHDOG_TIMEOUT_MS)
+        {
+            g_StaleMs += SMPTE_WATCHDOG_PERIOD_MS;
+
+            if (g_StaleMs >= SMPTE_WATCHDOG_TIMEOUT_MS)
+            {
+                /* fires once per stall event */
+                SMPTE_LTC_onTimeout(&g_LtcDecoder);
+            }
+        }
+    }
+    else
+    {
+        g_LastSeenEdgeSeq = g_EdgeSeq;
+        g_StaleMs         = 0;
+    }
+}
+
+//*****************************************************************************
+// This task decodes 80-bit SMPTE packets fed to it from the edge interrupt
+// handlers. Once a valid packet sync word is found in the stream, the 64-bit
+// word is passed to this task to extract and decode all the time and other
+// information to provide the main SPI host task with the time code
+// information needed via an SPI interrupt.
+//*****************************************************************************
+
+Void DecodeTaskFxn(UArg arg0, UArg arg1)
+{
+    bool wasSignalPresent = true;
+    bool wasTimedOut = false;
+    uint32_t key;
+    uint32_t lastBadSyncCount = 0;
+    SMPTE_Decoder_Timecode local;
+
+    SMPTE_Decoder *dec = SMPTE_HW_getDecoder();
+
+    /* Initialize and start edge decode interrupts */
+    SMPTE_Decoder_Start();
+
+    for (;;)
+    {
+        if (dec->frameReady)
+        {
+            key = Hwi_disable();
+            local = dec->tc;
+            dec->frameReady = false;
+            Hwi_restore(key);
+
+            //System_printf("%02u:%02u:%02u:%02u%s [%s]\n",
+            //              local.hours, local.minutes,
+            //              local.seconds, local.frames,
+            //              local.dropFrame ? " DF" : "",
+            //              local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
+
+            /* Toggle the LED on each packet received */
+            GPIO_toggle(Board_STAT_LED);
+
+            /* Now extract time data from the packet */
+
+            key = GateMutex_enter(gateMutex0);
+            g_timecode.frame = (uint8_t)local.frames;
+            g_timecode.secs  = (uint8_t)local.seconds;
+            g_timecode.mins  = (uint8_t)local.minutes;
+            g_timecode.hours = (uint8_t)local.hours;
+            GateMutex_leave(gateMutex0, key);
+
+            if (g_bPostInterrupts)
+            {
+                GPIO_write(Board_SMPTE_INT_N, PIN_LOW);
+            }
+        }
+
+        if (dec->signalPresent != wasSignalPresent)
+        {
+            wasSignalPresent = dec->signalPresent;
+
+            if (!wasSignalPresent) {
+                System_printf("LTC: edges present but failing to classify\n");
+            }
+        }
+
+        if (dec->timedOut != wasTimedOut)
+        {
+            wasTimedOut = dec->timedOut;
+
+            if (wasTimedOut)
+            {
+                System_printf("LTC: signal lost -- no edges (timeout #%u)\n", dec->timeoutCount);
+            }
+            else
+            {
+                System_printf("LTC: signal recovered\n");
+            }
+        }
+
+        if (dec->badSyncCount != lastBadSyncCount)
+        {
+            lastBadSyncCount = dec->badSyncCount;
+            System_printf("LTC: framing anomaly (total: %u)\n", dec->badSyncCount);
+        }
+
+        /* Frames arrive every ~33-42ms depending on fps; 5ms poll gives
+         * comfortable margin without burning cycles.
+         */
+        Task_sleep(5);
+    }
 }
 
 /* End-Of-File */
