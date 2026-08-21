@@ -110,7 +110,7 @@ extern uint32_t g_systemClock;
 
 /*** Interrupt Handlers ***/
 
-static Void WTimer1AIntHandler(UArg arg);
+static Void WTimer1AHwi(UArg arg);
 
 //*****************************************************************************
 //********************** SMPTE ENCODER SUPPORT ********************************
@@ -126,7 +126,7 @@ void SMPTE_initEncoder(void)
     hwiParams.priority  = 0x40;
     hwiParams.enableInt = true;
     Hwi_construct(&(wtimer1AHwiStruct), INT_WTIMER1A, 
-                    WTimer1AIntHandler, &hwiParams, &eb);
+                    WTimer1AHwi, &hwiParams, &eb);
     if (Error_check(&eb))
         System_abort("Couldn't construct WTIMER1A error hwi");
 
@@ -254,10 +254,10 @@ int SMPTE_Encoder_Stop(void)
 }
 
 //*****************************************************************************
-// WTIMER1A Interrupt Handler
+// WTIMER1A Harware Interrupt Handler
 //*****************************************************************************
 
-Void WTimer1AIntHandler(UArg arg)
+Void WTimer1AHwi(UArg arg)
 {
     /* Clear the timer interrupt flag */
     TimerIntClear(WTIMER1_BASE, TIMER_TIMA_TIMEOUT);

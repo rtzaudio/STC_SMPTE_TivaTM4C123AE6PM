@@ -183,22 +183,6 @@ static inline uint32_t SMPTE_LTC_ticksToUs(uint32_t ticks, uint32_t timerHz)
     return (uint32_t)(((uint64_t)ticks * 1000000u) / timerHz);
 }
 
-/*** LTCFrame Queue Elements ***********************************************/
-
-typedef struct _LTCFrameElement {
-    Queue_Elem  elem;
-    LTCFrame    frame;
-} LTCFrameElement;
-
-typedef struct _LTCFrameQueue {
-    /* queues and semaphores */
-    Queue_Handle        free_queue;
-    Queue_Handle        data_queue;
-    Semaphore_Handle    free_semaphore;
-    Semaphore_Handle    data_semaphore;
-    LTCFrameElement*    buf;                /* frame elements buffer */
-} LTCFrameQueue;
-
 /*** System Structures *****************************************************/
 
 /* This structure contains runtime and program configuration data that is
@@ -220,9 +204,9 @@ typedef struct _SYSCFG {
 /*** Function Prototypes ***************************************************/
 
 Int main();
-void InitSysDefaults(SYSCFG* p);
-int32_t SysParamsWrite(SYSCFG* sp);
-int32_t SysParamsRead(SYSCFG* sp);
+void SysConfig_Init(SYSCFG* p);
+int32_t SysConfig_Write(SYSCFG* sp);
+int32_t SysConfig_Read(SYSCFG* sp);
 Void SPI_SlaveTask(UArg a0, UArg a1);
 
 void SMPTE_initEncoder(void);

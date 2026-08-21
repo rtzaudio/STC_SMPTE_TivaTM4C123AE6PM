@@ -179,8 +179,8 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     SMPTE_initDecoder();
 
     /* Read system parameters from EEPROM */
-    //SysParamsRead(&g_cfg);
-    InitSysDefaults(&g_cfg);
+    //SysConfig_Read(&g_cfg);
+    SysConfig_Init(&g_cfg);
 
     /* Open SLAVE SPI port from STC motherboard
      * 1 Mhz, Moto fmt, polarity 1, phase 0
@@ -668,7 +668,7 @@ bool SPI_transferSync(SPI_Handle handle, SPI_Transaction *transaction)
 // Set default runtime values
 //*****************************************************************************
 
-void InitSysDefaults(SYSCFG* p)
+void SysConfig_Init(SYSCFG* p)
 {
     /* zero out config structure */
     memset(p, 0, sizeof(SYSCFG));
@@ -691,7 +691,7 @@ void InitSysDefaults(SYSCFG* p)
 //          -1 = Error writing EEPROM data
 //*****************************************************************************
 
-int32_t SysParamsWrite(SYSCFG* sp)
+int32_t SysConfig_Write(SYSCFG* sp)
 {
     int32_t rc = 0;
 
@@ -715,9 +715,9 @@ int32_t SysParamsWrite(SYSCFG* sp)
 //
 //*****************************************************************************
 
-int32_t SysParamsRead(SYSCFG* sp)
+int32_t SysConfig_Read(SYSCFG* sp)
 {
-    InitSysDefaults(sp);
+    SysConfig_Init(sp);
 
     EEPROMRead((uint32_t *)sp, 0, sizeof(SYSCFG));
 
@@ -725,8 +725,8 @@ int32_t SysParamsRead(SYSCFG* sp)
     {
         System_printf("ERROR Reading System Parameters - Resetting Defaults...\n");
         System_flush();
-        InitSysDefaults(sp);
-        SysParamsWrite(sp);
+        SysConfig_Init(sp);
+        SysConfig_Write(sp);
         return -1;
     }
 
@@ -734,8 +734,8 @@ int32_t SysParamsRead(SYSCFG* sp)
     {
         System_printf("WARNING New Firmware Version - Resetting Defaults...\n");
         System_flush();
-        InitSysDefaults(sp);
-        SysParamsWrite(sp);
+        SysConfig_Init(sp);
+        SysConfig_Write(sp);
         return -1;
     }
 
@@ -743,8 +743,8 @@ int32_t SysParamsRead(SYSCFG* sp)
     {
         System_printf("WARNING New Firmware BUILD - Resetting Defaults...\n");
         System_flush();
-        InitSysDefaults(sp);
-        SysParamsWrite(sp);
+        SysConfig_Init(sp);
+        SysConfig_Write(sp);
         return -1;
     }
 
