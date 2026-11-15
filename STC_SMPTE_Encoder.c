@@ -125,8 +125,9 @@ void SMPTE_initEncoder(void)
     Hwi_Params_init(&hwiParams);
     hwiParams.priority  = 0x40;
     hwiParams.enableInt = true;
-    Hwi_construct(&(wtimer1AHwiStruct), INT_WTIMER1A, 
-                    WTimer1AHwi, &hwiParams, &eb);
+
+    Hwi_construct(&(wtimer1AHwiStruct), INT_WTIMER1A, WTimer1AHwi, &hwiParams, &eb);
+
     if (Error_check(&eb))
         System_abort("Couldn't construct WTIMER1A error hwi");
 
