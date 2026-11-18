@@ -42,19 +42,21 @@ extern "C" {
 #define Board_initGeneral           STC_SMPTE_initGeneral
 #define Board_initGPIO              STC_SMPTE_initGPIO
 #define Board_initSPI               STC_SMPTE_initSPI
+
 #define Board_initWatchdog          STC_SMPTE_initWatchdog
 
-#define Board_SPI0                  STC_SMPTE_SPI0		    // SSI-0 : SPI SLAVE
+#define Board_I2C                   STC_SMPTE_I2C0          /* I2C0 : command and control requests */
+#define Board_SPI                   STC_SMPTE_SPI0		    /* SSI0 : SPI master to STC timecode streamer */
 
 #define Board_BOOTLOAD              STC_SMPTE_BOOTLOAD      /* 0 = PA7 */
-#define Board_SMPTE_IN              STC_SMPTE_IN            /* 1 = PC4 */
 #define Board_SMPTE_INT_N           STC_SMPTE_INT_N         /* 2 = PA6 */
 #define Board_SMPTE_OUT             STC_SMPTE_OUT           /* 3 = PB6 */
 #define Board_SMPTE_MUTE            STC_SMPTE_MUTE          /* 4 = PB7 */
-#define Board_STAT_LED              STC_SMPTE_STAT_LED      /* 5 = PC7 */
-#define Board_SLOWCODE              STC_SMPTE_SLOWCODE      /* 6 = PE0 */
-#define Board_FRAME_SYNC            STC_SMPTE_FRAMESYNC     /* 7 = PE1 */
-#define Board_DIRECTION             STC_SMPTE_DIRECTION     /* 8 = PE2 */
+#define Board_LED_RXD               STC_SMPTE_LED_RXD       /* 5 = PC6 */
+#define Board_LED_TXD               STC_SMPTE_LED_TXD       /* 6 = PC7 */
+#define Board_SLOWCODE              STC_SMPTE_SLOWCODE      /* 7 = PE0 */
+#define Board_FRAME_SYNC            STC_SMPTE_FRAMESYNC     /* 8 = PE1 */
+#define Board_DIRECTION             STC_SMPTE_DIRECTION     /* 9 = PE2 */
 #define Board_CHANGE                STC_SMPTE_CHANGE
 #define Board_RELAY                 STC_SMPTE_RELAY
 #define Board_WATCHDOG0             STC_SMPTE_WATCHDOG0

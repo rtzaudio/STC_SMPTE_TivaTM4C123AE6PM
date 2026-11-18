@@ -73,12 +73,12 @@ extern "C" {
  *  @brief  Enum of LED names on the STC_SMPTE dev board
  */
 typedef enum STC_SMPTE_GPIOName {
-    STC_SMPTE_IN = 0,               /* 0  = PC4 */
-    STC_SMPTE_BUSY_N,               /* 1  = PA7 */
-	STC_SMPTE_INT_N,	            /* 2  = PA6 */
-    STC_SMPTE_OUT,                  /* 3  = PB6 */
-    STC_SMPTE_MUTE,                 /* 4  = PB7 */
-	STC_SMPTE_STAT_LED,             /* 5  = PC7 */
+    STC_SMPTE_BUSY_N,               /* 0  = PA7 */
+	STC_SMPTE_INT_N,	            /* 1  = PA6 */
+    STC_SMPTE_OUT,                  /* 2  = PB6 */
+    STC_SMPTE_MUTE,                 /* 3  = PB7 */
+    STC_SMPTE_LED_RXD,              /* 4  = PC6 */
+	STC_SMPTE_LED_TXD,              /* 5  = PC7 */
 	STC_SMPTE_SLOWCODE,             /* 6  = PE0 */
     STC_SMPTE_FRAMESYNC,            /* 7  = PE1 */
     STC_SMPTE_DIRECTION,            /* 8  = PE2 */

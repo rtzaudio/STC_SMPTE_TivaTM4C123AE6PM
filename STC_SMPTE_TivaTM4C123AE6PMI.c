@@ -179,19 +179,18 @@ void STC_SMPTE_initGeneral(void)
  */
 
 GPIO_PinConfig gpioPinConfigs[] = {
-    /*=== Input pins ===*/
-    /* (0) STC_SMPTE_IN */
-    GPIOTiva_PC_4 | GPIO_CFG_INPUT,     //  | GPIO_CFG_IN_INT_BOTH_EDGES,
     /*=== Output pins ===*/
-    /* (1) STC_SMPTE_BUSY_N */
+    /* (0) STC_SMPTE_BUSY_N */
     GPIOTiva_PA_7 | GPIO_CFG_OUT_OD_PU | GPIO_CFG_OUT_HIGH,
-    /* (2) STC_SMPTE_INT_N */
+    /* (1) STC_SMPTE_INT_N */
     GPIOTiva_PA_6 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
-    /* (3) STC_SMPTE_OUT */
+    /* (2) STC_SMPTE_OUT */
     GPIOTiva_PB_6 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
-    /* (4) STC_SMPTE_MUTE */
+    /* (3) STC_SMPTE_MUTE */
     GPIOTiva_PB_7 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW,
-    /* (5) STC_SMPTE_STAT_LED */
+    /* (4) STC_SMPTE_LED_RXD */
+    GPIOTiva_PC_6 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
+    /* (5) STC_SMPTE_LED_TXD */
     GPIOTiva_PC_7 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_HIGH,
     /* (6) STC_SMPTE_SLOWCODE */
     GPIOTiva_PE_0 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW,
@@ -204,6 +203,7 @@ GPIO_PinConfig gpioPinConfigs[] = {
     /* (10) STC_SMPTE_RELAY */
     GPIOTiva_PF_4 | GPIO_CFG_OUTPUT | GPIO_CFG_OUT_LOW
 };
+
 
 /*
  * Array of callback function pointers
@@ -231,9 +231,6 @@ const GPIOTiva_Config GPIOTiva_config = {
  */
 void STC_SMPTE_initGPIO(void)
 {
-    // Enable pin PC4 for GPIOInput
-    GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_4);
-
     // Enable pin PA7 for GPIOOutput
     GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_7);
     // Enable pin PA6 for GPIOOutput
@@ -242,6 +239,8 @@ void STC_SMPTE_initGPIO(void)
     GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_6);
     // Enable pin PB7 for GPIOOutput
     GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_7);
+    // Enable pin PC6 for GPIOOutput
+    GPIOPinTypeGPIOOutput(GPIO_PORTC_BASE, GPIO_PIN_6);
     // Enable pin PC7 for GPIOOutput
     GPIOPinTypeGPIOOutput(GPIO_PORTC_BASE, GPIO_PIN_7);
     // Enable pin PE0 for GPIOOutput
@@ -263,7 +262,6 @@ void STC_SMPTE_initGPIO(void)
  *  =============================== I2C ===============================
  */
  
-#if 0
 /* Place into subsections to allow the TI linker to remove items properly */
 #if defined(__TI_COMPILER_VERSION__)
 #pragma DATA_SECTION(I2C_config, ".const:I2C_config")
@@ -284,11 +282,6 @@ const I2CTiva_HWAttrs i2cTivaHWAttrs[STC_SMPTE_I2CCOUNT] = {
         .intNum      = INT_I2C0,
         .intPriority = (~0)
     },
-    {
-        .baseAddr    = I2C1_BASE,
-        .intNum      = INT_I2C1,
-        .intPriority = (~0)
-    },
 };
 
 const I2C_Config I2C_config[] = {
@@ -296,11 +289,6 @@ const I2C_Config I2C_config[] = {
         .fxnTablePtr = &I2CTiva_fxnTable,
         .object      = &i2cTivaObjects[0],
         .hwAttrs     = &i2cTivaHWAttrs[0]
-    },
-    {
-        .fxnTablePtr = &I2CTiva_fxnTable,
-        .object      = &i2cTivaObjects[1],
-        .hwAttrs     = &i2cTivaHWAttrs[1]
     },
     {NULL, NULL, NULL}
 };
@@ -311,7 +299,6 @@ const I2C_Config I2C_config[] = {
 void STC_SMPTE_initI2C(void)
 {
     SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C0);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C1);
 
     // Enable pin PB2 for I2C0 I2C0SCL
     GPIOPinConfigure(GPIO_PB2_I2C0SCL);
@@ -320,16 +307,8 @@ void STC_SMPTE_initI2C(void)
     GPIOPinConfigure(GPIO_PB3_I2C0SDA);
     GPIOPinTypeI2C(GPIO_PORTB_BASE, GPIO_PIN_3);
 
-    // Enable pin PA7 for I2C1 I2C1SDA
-    GPIOPinConfigure(GPIO_PA7_I2C1SDA);
-    GPIOPinTypeI2C(GPIO_PORTA_BASE, GPIO_PIN_7);
-    // Enable pin PA6 for I2C1 I2C1SCL
-    GPIOPinConfigure(GPIO_PA6_I2C1SCL);
-    GPIOPinTypeI2CSCL(GPIO_PORTA_BASE, GPIO_PIN_6);
-
     I2C_init();
 }
-#endif
 
 /*
  *  =============================== SPI ===============================

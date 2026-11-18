@@ -195,7 +195,7 @@ Void SPI_SlaveTask(UArg a0, UArg a1)
     spiParams.bitRate       = 1000000;  //250000;
     spiParams.dataSize      = 16;
 
-    hSlave = SPI_open(STC_SMPTE_SPI0, &spiParams);
+    hSlave = SPI_open(Board_SPI, &spiParams);
 
     if (hSlave == NULL)
         System_abort("Error initializing SPI0\n");

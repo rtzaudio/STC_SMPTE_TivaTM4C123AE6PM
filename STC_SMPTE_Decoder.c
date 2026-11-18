@@ -362,7 +362,7 @@ int SMPTE_Decoder_Stop(void)
         TimerIntClear(WTIMER0_BASE, TIMER_CAPA_EVENT | TIMER_CAPB_EVENT);
 
         /* Status LED */
-        GPIO_write(Board_STAT_LED, Board_LED_ON);
+        GPIO_write(Board_LED_RXD, Board_LED_ON);
 
         /* SMPTE input mute on */
         GPIO_write(Board_SMPTE_MUTE, PIN_LOW);
@@ -829,7 +829,7 @@ Void DecodeTaskFxn(UArg arg0, UArg arg1)
             //              local.direction == SMPTE_DIR_REVERSE ? "REV" : "FWD");
 
             /* Toggle the LED on each packet received */
-            GPIO_toggle(Board_STAT_LED);
+            GPIO_toggle(Board_LED_RXD);
 
             /* Now extract time data from the packet */
 

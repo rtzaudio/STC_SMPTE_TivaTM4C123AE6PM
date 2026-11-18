@@ -206,7 +206,7 @@ int SMPTE_Encoder_Start(void)
     Hwi_restore(key);
 
     /* Turn the LED on initially, we toggle this as frames go out */
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
+    GPIO_write(Board_LED_TXD, Board_LED_ON);
     /* SMPTE output pin low initially */
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
     /* Enable relay to connect SMPTE output to line amp */
@@ -247,7 +247,7 @@ int SMPTE_Encoder_Stop(void)
     GPIO_write(Board_SMPTE_OUT, PIN_LOW);
     /* Relay off */
     GPIO_write(Board_RELAY, Board_RELAY_OFF);
-    GPIO_write(Board_STAT_LED, Board_LED_ON);
+    GPIO_write(Board_LED_TXD, Board_LED_OFF);
 
     g_encoderEnabled = false;
 
@@ -296,7 +296,7 @@ Void WTimer1AHwi(UArg arg)
             g_txBitCount = 0;
 
             /* Toggle the LED on each packet received */
-            GPIO_toggle(Board_STAT_LED);
+            GPIO_toggle(Board_LED_TXD);
         }
 
         /* Pre-load the state of the next bit to go out */
